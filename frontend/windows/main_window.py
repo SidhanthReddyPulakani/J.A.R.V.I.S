@@ -1,3 +1,5 @@
+import ctypes
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget
 
@@ -10,9 +12,9 @@ class MainWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # --------------------------------------------------
-        # Window
-        # --------------------------------------------------
+        # ==================================================
+        # WINDOW
+        # ==================================================
 
         self.setWindowTitle("Jarvis")
 
@@ -32,11 +34,39 @@ class MainWindow(QWidget):
             self.WINDOW_HEIGHT
         )
 
-        # --------------------------------------------------
-        # Search bar
-        # --------------------------------------------------
+        # ==================================================
+        # CONTROLLER
+        # ==================================================
 
-        self.search_bar = SearchBar(self)
+        self.jarvis_controller = None
+
+        self.pending_query = ""
+
+        # ==================================================
+        # CONVERSATION
+        # ==================================================
+
+        self.conversation = ConversationStack(
+            self
+        )
+
+        self.CONVERSATION_X = 40
+        self.CONVERSATION_WIDTH = 820
+
+        self.conversation.setGeometry(
+            self.CONVERSATION_X,
+            20,
+            self.CONVERSATION_WIDTH,
+            100
+        )
+
+        # ==================================================
+        # SEARCH BAR
+        # ==================================================
+
+        self.search_bar = SearchBar(
+            self
+        )
 
         self.SEARCH_WIDTH = 820
         self.SEARCH_HEIGHT = 58
@@ -54,74 +84,146 @@ class MainWindow(QWidget):
             self.SEARCH_HEIGHT
         )
 
-        # --------------------------------------------------
-        # Conversation
-        # --------------------------------------------------
-
-        self.conversation = ConversationStack(self)
-
-        # Conversation has EXACTLY the same width as
-        # the search bar.
-        self.CONVERSATION_X = self.SEARCH_X
-        self.CONVERSATION_WIDTH = self.SEARCH_WIDTH
-
-        self.conversation.setGeometry(
-            self.CONVERSATION_X,
-            20,
-            self.CONVERSATION_WIDTH,
-            100
-        )
-
-        # --------------------------------------------------
-        # Backend controller
-        # --------------------------------------------------
-
-        self.jarvis_controller = None
-
         self.search_bar.submitted.connect(
             self.send_to_backend
         )
 
+        # ==================================================
+        # DESKTOP POSITION
+        # ==================================================
+
+        self.move_to_desktop()
+
     # ======================================================
-    # USER → BACKEND
+    # DESKTOP POSITION
+    # ======================================================
+
+    def move_to_desktop(self):
+
+        screen = self.screen()
+
+        if screen is None:
+            screen = self.windowHandle().screen()
+
+        if screen is None:
+            return
+
+        geometry = screen.availableGeometry()
+
+        x = (
+            geometry.left()
+            + (
+                geometry.width()
+                - self.WINDOW_WIDTH
+            ) // 2
+        )
+
+        y = (
+            geometry.top()
+            + (
+                geometry.height()
+                - self.WINDOW_HEIGHT
+            ) // 2
+        )
+
+        self.move(x, y)
+
+    # ======================================================
+    # DESKTOP Z-ORDER
+    # ======================================================
+
+    def put_on_desktop(self):
+
+        hwnd = int(
+            self.winId()
+        )
+
+        user32 = ctypes.windll.user32
+
+        HWND_BOTTOM = 1
+
+        SWP_NOSIZE = 0x0001
+        SWP_NOMOVE = 0x0002
+        SWP_NOACTIVATE = 0x0010
+        SWP_SHOWWINDOW = 0x0040
+
+        user32.SetWindowPos(
+            hwnd,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOSIZE
+            | SWP_NOMOVE
+            | SWP_NOACTIVATE
+            | SWP_SHOWWINDOW
+        )
+
+    # ======================================================
+    # SHOW
+    # ======================================================
+
+    def showEvent(self, event):
+
+        super().showEvent(event)
+
+        self.move_to_desktop()
+
+        # Give Windows a moment to create the native
+        # window, then force it to the bottom of the
+        # normal window Z-order.
+        self.put_on_desktop()
+
+    # ======================================================
+    # CONTROLLER
+    # ======================================================
+
+    def set_controller(self, controller):
+
+        self.jarvis_controller = controller
+
+    # ======================================================
+    # USER → CONTROLLER
     # ======================================================
 
     def send_to_backend(self, text):
 
+        if not text:
+            return
+
         if self.jarvis_controller is None:
 
             self.on_error(
+                text,
                 "Jarvis controller is not connected."
             )
 
             return
 
-        backend = self.jarvis_controller.backend
+        self.pending_query = text
 
-        if not backend.is_running():
-
-            self.on_error(
-                "Jarvis backend is not running."
-            )
-
-            return
-
-        self.search_bar.last_submitted = text
-
-        backend.ask(text)
+        self.jarvis_controller.ask(text)
 
     # ======================================================
-    # BACKEND → UI
+    # CONTROLLER → UI
     # ======================================================
 
-    def on_response(self, response):
+    def on_response(
+        self,
+        query,
+        response
+    ):
 
-        query = self.search_bar.last_submitted
+        if not query:
+            query = self.pending_query
 
         self.conversation.add_conversation(
             query,
             response
         )
+
+        self.pending_query = ""
 
         self.update_conversation_position()
 
@@ -129,14 +231,21 @@ class MainWindow(QWidget):
     # ERROR
     # ======================================================
 
-    def on_error(self, error):
+    def on_error(
+        self,
+        query,
+        error
+    ):
 
-        query = self.search_bar.last_submitted
+        if not query:
+            query = self.pending_query
 
         self.conversation.add_conversation(
             query,
             f"Backend error: {error}"
         )
+
+        self.pending_query = ""
 
         self.update_conversation_position()
 
@@ -156,12 +265,12 @@ class MainWindow(QWidget):
 
     def update_conversation_position(self):
 
-        # The search bar NEVER moves.
         search_y = self.search_bar.y()
 
-        # Ask Qt how tall the actual conversation content is.
         content_height = (
-            self.conversation.sizeHint().height()
+            self.conversation
+            .sizeHint()
+            .height()
         )
 
         if content_height <= 0:
@@ -169,24 +278,19 @@ class MainWindow(QWidget):
 
         gap = 8
 
-        # The conversation's bottom edge is locked
-        # just above the search bar.
-        bottom = search_y - gap
+        bottom = (
+            search_y
+            - gap
+        )
 
-        # Grow upward.
         top = max(
             10,
             bottom - content_height
         )
 
-        height = bottom - top
-
-        # --------------------------------------------------
-        # IMPORTANT:
-        #
-        # Width is ALWAYS fixed to the search bar width.
-        # Only height changes.
-        # --------------------------------------------------
+        height = (
+            bottom - top
+        )
 
         self.conversation.setGeometry(
             self.CONVERSATION_X,
@@ -195,10 +299,8 @@ class MainWindow(QWidget):
             height
         )
 
-        # Conversation behind the search bar.
         self.conversation.raise_()
 
-        # Search bar stays on top.
         self.search_bar.raise_()
 
     # ======================================================

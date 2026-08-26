@@ -1,7 +1,11 @@
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import (
+    QObject,
+    Signal,
+    QTimer,
+)
 
 from backend_bridge import BackendBridge
 
@@ -11,6 +15,7 @@ from backend_bridge import BackendBridge
 # ------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 BACKEND_DIR = PROJECT_ROOT / "backend"
 
 if str(BACKEND_DIR) not in sys.path:
@@ -26,18 +31,41 @@ class JarvisController(QObject):
     def __init__(self, window, parent=None):
         super().__init__(parent)
 
+        # --------------------------------------------------
+        # Interfaces
+        # --------------------------------------------------
+
         self.window = window
-
-        # Backend process controller
-        self.backend = BackendBridge(self)
-
-        # Ollama process controller
-        self.ollama = OllamaController()
-
-        self.enabled = False
+        self.overlay = None
 
         # --------------------------------------------------
-        # Backend → Frontend
+        # Backend
+        # --------------------------------------------------
+
+        self.backend = BackendBridge(self)
+
+        # --------------------------------------------------
+        # Ollama
+        # --------------------------------------------------
+
+        self.ollama = OllamaController()
+
+        # --------------------------------------------------
+        # State
+        # --------------------------------------------------
+
+        self.enabled = False
+        self.starting = False
+        self.stopping = False
+
+        # --------------------------------------------------
+        # Shared request state
+        # --------------------------------------------------
+
+        self.last_query = ""
+
+        # --------------------------------------------------
+        # Backend → Controller
         # --------------------------------------------------
 
         self.backend.response_ready.connect(
@@ -52,91 +80,223 @@ class JarvisController(QObject):
             self._forward_busy
         )
 
-    # ------------------------------------------------------
-    # Start Jarvis
-    # ------------------------------------------------------
+    # ======================================================
+    # INTERFACES
+    # ======================================================
+
+    def set_overlay(self, overlay):
+
+        self.overlay = overlay
+
+    # ======================================================
+    # START
+    # ======================================================
 
     def start(self):
 
-        if self.enabled:
+        if self.enabled or self.starting:
             return
 
-        print("\n[Starting Jarvis]")
+        self.starting = True
+        self.stopping = False
 
-        # Start Ollama first
+        print(
+            "\n[Starting Jarvis]"
+        )
+
+        # --------------------------------------------------
+        # Start Ollama
+        # --------------------------------------------------
+
         if not self.ollama.start():
+
+            self.starting = False
 
             print(
                 "[Jarvis failed: Ollama could not start]"
             )
 
+            self.state_changed.emit(False)
+
             return
 
-        # Give Ollama a moment to initialize.
-        # This does not freeze the Qt UI.
+        # --------------------------------------------------
+        # Give Ollama time to initialize.
+        # --------------------------------------------------
+
         QTimer.singleShot(
             1000,
             self._start_backend
         )
 
+    # ======================================================
+    # START BACKEND
+    # ======================================================
+
     def _start_backend(self):
 
-        if self.enabled:
+        # --------------------------------------------------
+        # A shutdown may have been requested while Ollama
+        # was starting.
+        # --------------------------------------------------
+
+        if self.stopping:
+
+            self.starting = False
+
+            print(
+                "[Jarvis] Startup cancelled."
+            )
+
             return
+
+        if self.enabled:
+
+            self.starting = False
+
+            return
+
+        print(
+            "[JarvisController] Starting backend."
+        )
 
         self.backend.start()
 
+        self.starting = False
         self.enabled = True
 
         self.state_changed.emit(True)
 
-        print("[Jarvis ENABLED]")
+        print(
+            "[Jarvis ENABLED]"
+        )
 
-    # ------------------------------------------------------
-    # Stop Jarvis
-    # ------------------------------------------------------
+    # ======================================================
+    # STOP
+    # ======================================================
 
     def stop(self):
 
-        if not self.enabled:
+        # --------------------------------------------------
+        # Prevent duplicate shutdown requests.
+        # --------------------------------------------------
+
+        if self.stopping:
             return
 
-        print("\n[Stopping Jarvis]")
+        self.stopping = True
 
-        # Hide interface
-        self.window.hide()
+        print(
+            "\n[Stopping Jarvis]"
+        )
 
-        # Stop backend process
-        self.backend.stop()
-
-        # Stop Ollama
-        self.ollama.stop()
+        # --------------------------------------------------
+        # Immediately mark the logical state disabled.
+        #
+        # This prevents new requests while shutdown occurs.
+        # --------------------------------------------------
 
         self.enabled = False
+        self.starting = False
+        self.last_query = ""
+
+        # --------------------------------------------------
+        # Hide main interface.
+        # --------------------------------------------------
+
+        if self.window is not None:
+
+            self.window.hide()
+
+        # --------------------------------------------------
+        # Hide overlay.
+        # --------------------------------------------------
+
+        if self.overlay is not None:
+
+            self.overlay.hide()
+
+        # --------------------------------------------------
+        # Stop backend.
+        # --------------------------------------------------
+
+        try:
+
+            self.backend.stop()
+
+        except Exception as exc:
+
+            print(
+                f"[JarvisController] "
+                f"Backend shutdown error: {exc}"
+            )
+
+        # --------------------------------------------------
+        # Stop Ollama + unload models + clean stale
+        # llama-server processes.
+        # --------------------------------------------------
+
+        try:
+
+            ollama_clean = self.ollama.stop()
+
+        except Exception as exc:
+
+            ollama_clean = False
+
+            print(
+                f"[JarvisController] "
+                f"Ollama shutdown error: {exc}"
+            )
+
+        # --------------------------------------------------
+        # Tell frontend about final state.
+        # --------------------------------------------------
 
         self.state_changed.emit(False)
 
-        print("[Jarvis DISABLED]")
+        self.stopping = False
 
-    # ------------------------------------------------------
-    # Master toggle
-    # ------------------------------------------------------
+        if ollama_clean:
+
+            print(
+                "[Jarvis DISABLED]"
+            )
+
+        else:
+
+            print(
+                "[Jarvis DISABLED - "
+                "Ollama cleanup reported a problem]"
+            )
+
+    # ======================================================
+    # MASTER TOGGLE
+    # ======================================================
 
     def toggle(self):
 
-        if self.enabled:
+        if (
+            self.enabled
+            or self.starting
+        ):
+
             self.stop()
+
         else:
+
             self.start()
 
-    # ------------------------------------------------------
-    # Interface-only toggle
-    # ------------------------------------------------------
+    # ======================================================
+    # MAIN INTERFACE TOGGLE
+    # ======================================================
 
     def toggle_interface(self):
 
-        # Don't show the UI if the entire
-        # Jarvis system is disabled.
+        # --------------------------------------------------
+        # Interface cannot appear while Jarvis is disabled.
+        # --------------------------------------------------
+
         if not self.enabled:
             return
 
@@ -150,24 +310,163 @@ class JarvisController(QObject):
             self.window.raise_()
             self.window.activateWindow()
 
-    # ------------------------------------------------------
-    # Backend response forwarding
-    # ------------------------------------------------------
+    # ======================================================
+    # ASK
+    # ======================================================
+
+    def ask(self, text):
+
+        text = str(text).strip()
+
+        if not text:
+            return
+
+        # --------------------------------------------------
+        # Jarvis disabled.
+        # --------------------------------------------------
+
+        if not self.enabled:
+
+            self._broadcast_error(
+                "Jarvis backend is not running."
+            )
+
+            return
+
+        # --------------------------------------------------
+        # Backend process unavailable.
+        # --------------------------------------------------
+
+        if not self.backend.is_running():
+
+            self._broadcast_error(
+                "Jarvis backend is not running."
+            )
+
+            return
+
+        # --------------------------------------------------
+        # Store query centrally.
+        # --------------------------------------------------
+
+        self.last_query = text
+
+        print(
+            f"[JarvisController] Query: {text}"
+        )
+
+        # --------------------------------------------------
+        # ONE backend.
+        # --------------------------------------------------
+
+        self.backend.ask(text)
+
+    # ======================================================
+    # RESPONSE
+    # ======================================================
 
     def _forward_response(self, response):
 
-        self.window.on_response(
-            response
+        query = self.last_query
+
+        print(
+            "[JarvisController] "
+            "Broadcasting response."
         )
+
+        # --------------------------------------------------
+        # Main interface.
+        # --------------------------------------------------
+
+        if self.window is not None:
+
+            self.window.on_response(
+                query,
+                response
+            )
+
+        # --------------------------------------------------
+        # Overlay interface.
+        # --------------------------------------------------
+
+        if self.overlay is not None:
+
+            self.overlay.on_response(
+                query,
+                response
+            )
+
+        self.last_query = ""
+
+    # ======================================================
+    # ERROR
+    # ======================================================
 
     def _forward_error(self, error):
 
-        self.window.on_error(
-            error
+        query = self.last_query
+
+        print(
+            "[JarvisController] "
+            "Broadcasting error."
         )
+
+        # --------------------------------------------------
+        # Main interface.
+        # --------------------------------------------------
+
+        if self.window is not None:
+
+            self.window.on_error(
+                query,
+                error
+            )
+
+        # --------------------------------------------------
+        # Overlay interface.
+        # --------------------------------------------------
+
+        if self.overlay is not None:
+
+            self.overlay.on_error(
+                query,
+                error
+            )
+
+        self.last_query = ""
+
+    # ======================================================
+    # BUSY
+    # ======================================================
 
     def _forward_busy(self, busy):
 
-        self.window.on_busy_changed(
-            busy
+        # --------------------------------------------------
+        # Main interface.
+        # --------------------------------------------------
+
+        if self.window is not None:
+
+            self.window.on_busy_changed(
+                busy
+            )
+
+        # --------------------------------------------------
+        # Overlay interface.
+        # --------------------------------------------------
+
+        if self.overlay is not None:
+
+            self.overlay.on_busy_changed(
+                busy
+            )
+
+    # ======================================================
+    # INTERNAL ERROR BROADCAST
+    # ======================================================
+
+    def _broadcast_error(self, error):
+
+        self._forward_error(
+            error
         )
