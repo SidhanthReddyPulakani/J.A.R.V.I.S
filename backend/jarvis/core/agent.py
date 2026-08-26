@@ -5,7 +5,7 @@ from jarvis.core.state import AgentState
 from jarvis.core.tools import AVAILABLE_TOOLS
 from jarvis.storage.database import database
 from jarvis.storage.repositories.agent_state import AgentStateRepository
-
+from jarvis.core.context import ContextManager
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
@@ -50,14 +50,24 @@ class JarvisAgent:
                 self.state
             )
 
-        self.messages = [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            }
-        ]
+        self.context_manager = ContextManager(
+            system_prompt=SYSTEM_PROMPT
+        )
 
+        self.messages = []
+
+    def _build_context(self):
+        """
+        Build a fresh Context for the current reasoning step.
+        """
+
+        return self.context_manager.build(
+            state=self.state,
+            conversation=self.messages,
+    )
+    
     def run(self, user_input: str) -> str:
+
         self.messages.append(
             {
                 "role": "user",
@@ -65,8 +75,14 @@ class JarvisAgent:
             }
         )
 
+        # --------------------------------------------------
+        # Reasoning step 1
+        # --------------------------------------------------
+
+        context = self._build_context()
+
         response = self.llm.chat(
-            messages=self.messages,
+            messages=context.as_messages(),
             tools=list(
                 AVAILABLE_TOOLS.values()
             ),
@@ -75,6 +91,14 @@ class JarvisAgent:
         self.messages.append(
             response.message
         )
+
+        # --------------------------------------------------
+        # Capability/tool execution
+        #
+        # This is still the OLD pathway for now.
+        # Phase 2/4 will replace it with the
+        # Capability Controller.
+        # --------------------------------------------------
 
         if response.message.tool_calls:
 
@@ -90,17 +114,20 @@ class JarvisAgent:
                 )
 
                 if function is None:
+
                     result = (
                         f"Unknown tool: {name}"
                     )
 
                 else:
+
                     try:
                         result = str(
                             function(**args)
                         )
 
                     except Exception as exc:
+
                         result = (
                             "Tool execution failed: "
                             f"{exc}"
@@ -114,8 +141,17 @@ class JarvisAgent:
                     }
                 )
 
+            # --------------------------------------------------
+            # Reasoning step 2
+            #
+            # Build a NEW context because the conversation
+            # changed.
+            # --------------------------------------------------
+
+            context = self._build_context()
+
             final = self.llm.chat(
-                messages=self.messages,
+                messages=context.as_messages(),
                 tools=list(
                     AVAILABLE_TOOLS.values()
                 ),
@@ -138,7 +174,6 @@ class JarvisAgent:
             response.message.content
             or "I'm ready."
         )
-
     def _persist_state(self) -> None:
         """Persist the current Agent State."""
         self.state_repository.save(

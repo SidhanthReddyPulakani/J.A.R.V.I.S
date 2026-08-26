@@ -1,96 +1,106 @@
-"""
-Manual persistence test for Agent State.
-
-Run from backend/:
-
-    python test_agent_state.py
-"""
-
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
+from jarvis.core.context import ContextManager
 from jarvis.core.state import AgentState
-from jarvis.storage.database import Database
-from jarvis.storage.repositories.agent_state import (
-    AgentStateRepository,
-)
+
+
+SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
+
+Be concise and conversational.
+"""
 
 
 def main() -> None:
 
-    with TemporaryDirectory() as temp_dir:
+    state = AgentState(
+        agent_id="test-jarvis",
+        conversation_id=42,
+        current_task="Testing context",
+        current_goal="Verify state compilation",
+        mode="testing",
+        active_project="Jarvis",
+        active_operation=None,
+        operation_status="idle",
+    )
 
-        database_path = (
-            Path(temp_dir)
-            / "test_jarvis.db"
+    conversation = [
+        {
+            "role": "user",
+            "content": "What are we working on?",
+        },
+    ]
+
+    manager = ContextManager(
+        system_prompt=SYSTEM_PROMPT
+    )
+
+    context = manager.build(
+        state=state,
+        conversation=conversation,
+    )
+
+    messages = context.as_messages()
+
+    assert len(messages) == 2
+
+    system_message = messages[0]
+
+    assert system_message["role"] == "system"
+
+    assert (
+        "Testing context"
+        in system_message["content"]
+    )
+
+    assert (
+        "Verify state compilation"
+        in system_message["content"]
+    )
+
+    assert (
+        "Jarvis"
+        in system_message["content"]
+    )
+
+    assert (
+        messages[1]["content"]
+        == "What are we working on?"
+    )
+
+    print("COMPILED CONTEXT:")
+    print()
+
+    for message in messages:
+        print(
+            f"[{message['role']}]"
         )
-
-        db = Database(
-            database_path
+        print(
+            message["content"]
         )
-
-        # First process/session.
-        db.initialize()
-
-        repository = AgentStateRepository(
-            db
-        )
-
-        state = AgentState(
-            agent_id="test-jarvis",
-            current_task="Test persistence",
-            current_goal="Verify state survives reload",
-            mode="testing",
-            active_project="Jarvis",
-        )
-
-        repository.save(state)
-
-        print("SAVED:")
-        print(state.to_dict())
-
-        # Simulate a completely fresh repository
-        # using the same database file.
-        db_again = Database(
-            database_path
-        )
-
-        db_again.initialize()
-
-        repository_again = AgentStateRepository(
-            db_again
-        )
-
-        loaded = repository_again.get(
-            "test-jarvis"
-        )
-
         print()
-        print("LOADED:")
 
-        if loaded is None:
-            print("FAIL: state was not found")
-            raise SystemExit(1)
+    print(
+        "PASS: Context compilation works."
+    )
+    state.set_task(
+        "Build the Context Manager"
+    )
 
-        print(loaded.to_dict())
+    context = manager.build(
+        state=state,
+        conversation=conversation,
+    )
 
-        assert loaded.agent_id == "test-jarvis"
-        assert (
-            loaded.current_task
-            == "Test persistence"
-        )
-        assert (
-            loaded.current_goal
-            == "Verify state survives reload"
-        )
-        assert loaded.mode == "testing"
-        assert (
-            loaded.active_project
-            == "Jarvis"
-        )
+    system_content = (
+        context.as_messages()[0]["content"]
+    )
 
-        print()
-        print("PASS: Agent State persisted successfully.")
+    assert (
+        "Build the Context Manager"
+        in system_content
+    )
+
+    print(
+        "PASS: Context reflects updated Agent State."
+    )
 
 
 if __name__ == "__main__":
