@@ -5,7 +5,7 @@ This module contains the SQL required to create the initial
 Jarvis database structure.
 """
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 SCHEMA_SQL = """
@@ -49,7 +49,31 @@ ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at
 ON messages(created_at);
 
+-- --------------------------------------------------
+-- Agent State
+-- --------------------------------------------------
 
+CREATE TABLE IF NOT EXISTS agent_state (
+    agent_id TEXT PRIMARY KEY,
+
+    conversation_id INTEGER,
+
+    current_task TEXT,
+    current_goal TEXT,
+
+    mode TEXT NOT NULL DEFAULT 'idle',
+
+    active_project TEXT,
+
+    active_operation TEXT,
+    operation_status TEXT NOT NULL DEFAULT 'idle',
+
+    updated_at TEXT NOT NULL,
+
+    FOREIGN KEY (conversation_id)
+        REFERENCES conversations(id)
+        ON DELETE SET NULL
+);
 -- --------------------------------------------------
 -- Memories
 -- --------------------------------------------------

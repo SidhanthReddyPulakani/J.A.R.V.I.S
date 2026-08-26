@@ -6,6 +6,7 @@ destroying existing user data.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 
 from jarvis.storage.schema import SCHEMA_SQL, SCHEMA_VERSION
 
@@ -46,51 +47,97 @@ def get_schema_version(connection: sqlite3.Connection) -> int:
     return int(row[0])
 
 
+def record_schema_version(
+    connection: sqlite3.Connection,
+    version: int,
+) -> None:
+    """Record a successfully applied schema version."""
+
+    connection.execute(
+        """
+        INSERT INTO schema_version (
+            version,
+            applied_at
+        )
+        VALUES (?, ?)
+        """,
+        (
+            version,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """
     Create the initial database schema.
+
+    This is only used for a brand-new database.
     """
 
     current_version = get_schema_version(connection)
 
-    if current_version >= SCHEMA_VERSION:
+    if current_version != 0:
         return
 
-    if current_version == 0:
-        connection.executescript(SCHEMA_SQL)
+    connection.executescript(SCHEMA_SQL)
 
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            )
-            """
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
         )
-
-        from datetime import datetime, timezone
-
-        connection.execute(
-            """
-            INSERT INTO schema_version (
-                version,
-                applied_at
-            )
-            VALUES (?, ?)
-            """,
-            (
-                SCHEMA_VERSION,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-
-        connection.commit()
-
-        return
-
-    raise RuntimeError(
-        f"Unsupported database schema version: {current_version}"
+        """
     )
+
+    record_schema_version(
+        connection,
+        SCHEMA_VERSION,
+    )
+
+    connection.commit()
+
+
+def migrate_to_v2(connection: sqlite3.Connection) -> None:
+    """
+    Upgrade an existing v1 database to v2.
+
+    v2 introduces persistent Agent State.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_state (
+            agent_id TEXT PRIMARY KEY,
+
+            conversation_id INTEGER,
+
+            current_task TEXT,
+            current_goal TEXT,
+
+            mode TEXT NOT NULL DEFAULT 'idle',
+
+            active_project TEXT,
+
+            active_operation TEXT,
+            operation_status TEXT NOT NULL DEFAULT 'idle',
+
+            updated_at TEXT NOT NULL,
+
+            FOREIGN KEY (conversation_id)
+                REFERENCES conversations(id)
+                ON DELETE SET NULL
+        )
+        """
+    )
+
+    record_schema_version(
+        connection,
+        2,
+    )
+
+    connection.commit()
 
 
 def migrate(connection: sqlite3.Connection) -> None:
@@ -98,4 +145,26 @@ def migrate(connection: sqlite3.Connection) -> None:
     Apply all required database migrations.
     """
 
-    initialize_schema(connection)
+    current_version = get_schema_version(connection)
+
+    if current_version == 0:
+        initialize_schema(connection)
+        return
+
+    if current_version == 1:
+        migrate_to_v2(connection)
+        current_version = 2
+
+    if current_version > SCHEMA_VERSION:
+        raise RuntimeError(
+            "Database schema version "
+            f"{current_version} is newer than the "
+            f"supported version {SCHEMA_VERSION}."
+        )
+
+    if current_version != SCHEMA_VERSION:
+        raise RuntimeError(
+            "Database migration incomplete: "
+            f"database={current_version}, "
+            f"expected={SCHEMA_VERSION}"
+        )
