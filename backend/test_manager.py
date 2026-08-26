@@ -2,18 +2,22 @@ from jarvis.features.apps.manager import ApplicationManager
 
 manager = ApplicationManager()
 
-for query in [
-    "vscode",
-    "vs code",
-    "chrome",
-    "brave browser",
-    "vs code",
-]:
-    result = manager.resolve_detailed(query)
+apps = manager.applications()
 
-    print()
-    print("QUERY:", query)
-    print("RESULT:", result.application)
-    print("CONFIDENCE:", result.confidence)
-    print("REASON:", result.reason)
-    print("CANDIDATES:", [a.name for a in result.candidates])
+brave = next(
+    app for app in apps
+    if app.name.lower() == "brave"
+)
+
+relationship = manager.confirm_relationship(
+    "browser",
+    brave,
+)
+
+print(relationship)
+
+result = manager.resolve_detailed(
+    "browser"
+)
+
+print(result)

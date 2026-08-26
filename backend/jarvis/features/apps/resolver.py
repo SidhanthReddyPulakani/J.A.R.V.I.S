@@ -2,9 +2,21 @@
 Application name resolution.
 
 This module resolves user-provided application names against
-the applications discovered by ApplicationDiscovery.
+applications discovered by ApplicationDiscovery.
 
 The resolver does NOT contain a hard-coded application list.
+
+Resolution priority:
+
+1. Learned relationship
+2. Exact normalized application name
+3. Scored/fuzzy matching
+4. Ambiguous / weak result
+
+The relationship system is generic and does not know anything
+about applications. This resolver is responsible for translating
+a stored relationship target back into an actual discovered
+Application object.
 """
 
 from dataclasses import dataclass
@@ -12,6 +24,7 @@ import re
 from difflib import SequenceMatcher
 
 from jarvis.features.apps.models import Application
+from jarvis.relationships.resolver import RelationshipResolver
 
 
 @dataclass(frozen=True)
@@ -40,24 +53,34 @@ class ResolutionResult:
 
 class ApplicationResolver:
     """
-    Resolves application names using discovered applications.
-
-    Matching order:
-
-    1. Exact normalized match
-    2. Token-aware match
-    3. Fuzzy similarity
-    4. Candidate scoring
+    Resolves application names using discovered applications
+    and learned relationships.
 
     No application names are hard-coded here.
     """
 
-    # Minimum score required for an automatic resolution.
+    RELATIONSHIP_TARGET_TYPE = "application"
+
+    # Minimum score required for automatic fuzzy resolution.
     RESOLUTION_THRESHOLD = 0.72
 
-    # Difference required between first and second candidate
-    # before we consider the result confidently resolvable.
+    # Minimum difference required between the first and second
+    # candidate before automatic resolution is considered safe.
     MIN_SCORE_MARGIN = 0.12
+
+    def __init__(
+        self,
+        relationship_resolver: RelationshipResolver | None = None,
+    ) -> None:
+
+        self.relationship_resolver = (
+            relationship_resolver
+            or RelationshipResolver()
+        )
+
+    # ======================================================
+    # Public API
+    # ======================================================
 
     def resolve(
         self,
@@ -67,13 +90,8 @@ class ApplicationResolver:
         """
         Resolve an application query.
 
-        Returns an application only when the resolver is
+        Returns an Application only when the resolver is
         sufficiently confident.
-
-        Returns None when:
-        - nothing matches
-        - the result is too weak
-        - multiple candidates are too close
         """
 
         result = self.resolve_detailed(
@@ -90,10 +108,12 @@ class ApplicationResolver:
     ) -> ResolutionResult:
         """
         Resolve an application query while preserving
-        information about candidate matches.
+        candidate and confidence information.
         """
 
-        normalized_query = self._normalize(query)
+        normalized_query = self._normalize(
+            query
+        )
 
         if not normalized_query:
             return ResolutionResult(
@@ -114,14 +134,29 @@ class ApplicationResolver:
             )
 
         # --------------------------------------------------
-        # 1. Exact match
+        # 1. Learned relationship
+        # --------------------------------------------------
+
+        relationship_result = (
+            self._resolve_relationship(
+                query=query,
+                applications=applications,
+            )
+        )
+
+        if relationship_result is not None:
+            return relationship_result
+
+        # --------------------------------------------------
+        # 2. Exact application name
         # --------------------------------------------------
 
         exact_matches = [
             application
             for application in applications
-            if self._normalize(application.name)
-            == normalized_query
+            if self._normalize(
+                application.name
+            ) == normalized_query
         ]
 
         if len(exact_matches) == 1:
@@ -143,12 +178,13 @@ class ApplicationResolver:
             )
 
         # --------------------------------------------------
-        # 2. Score all candidates
+        # 3. Score discovered applications
         # --------------------------------------------------
 
         scored = []
 
         for application in applications:
+
             score = self._score(
                 normalized_query,
                 application,
@@ -187,7 +223,7 @@ class ApplicationResolver:
         ]
 
         # --------------------------------------------------
-        # 3. Weak match
+        # 4. Weak match
         # --------------------------------------------------
 
         if best_score < self.RESOLUTION_THRESHOLD:
@@ -200,10 +236,11 @@ class ApplicationResolver:
             )
 
         # --------------------------------------------------
-        # 4. Ambiguous match
+        # 5. Ambiguous match
         # --------------------------------------------------
 
         if len(scored) > 1:
+
             second_score = scored[1][0]
 
             if (
@@ -219,7 +256,7 @@ class ApplicationResolver:
                 )
 
         # --------------------------------------------------
-        # 5. Strong match
+        # 6. Strong match
         # --------------------------------------------------
 
         return ResolutionResult(
@@ -228,6 +265,91 @@ class ApplicationResolver:
             candidates=candidates,
             confidence=best_score,
             reason="scored_match",
+        )
+
+    # ======================================================
+    # Relationship resolution
+    # ======================================================
+
+    def _resolve_relationship(
+        self,
+        query: str,
+        applications: list[Application],
+    ) -> ResolutionResult | None:
+        """
+        Check whether the user has previously established
+        a relationship for this query.
+
+        The relationship stores a target name, while discovery
+        provides the actual Application object.
+
+        Example:
+
+            relationship:
+                "browser" -> "Brave"
+
+            discovery:
+                Application(name="Brave", ...)
+
+        If the relationship points to an application that is
+        no longer discovered, it is ignored.
+        """
+
+        relationship = (
+            self.relationship_resolver.resolve(
+                source=query,
+                target_type=self.RELATIONSHIP_TARGET_TYPE,
+            )
+        )
+
+        if relationship is None:
+            return None
+
+        target_name = self._normalize(
+            relationship.target
+        )
+
+        if not target_name:
+            return None
+
+        matching_applications = [
+            application
+            for application in applications
+            if self._normalize(
+                application.name
+            ) == target_name
+        ]
+
+        # --------------------------------------------------
+        # Relationship is stale.
+        #
+        # The application no longer exists in discovery.
+        # Do not trust the relationship.
+        # --------------------------------------------------
+
+        if not matching_applications:
+            return None
+
+        # There should normally be one discovered application
+        # with this exact name. If there are several, don't
+        # blindly choose one.
+        if len(matching_applications) > 1:
+            return ResolutionResult(
+                query=query,
+                application=None,
+                candidates=matching_applications,
+                confidence=relationship.confidence,
+                reason="ambiguous_relationship_target",
+            )
+
+        application = matching_applications[0]
+
+        return ResolutionResult(
+            query=query,
+            application=application,
+            candidates=matching_applications,
+            confidence=relationship.confidence,
+            reason="learned_relationship",
         )
 
     # ======================================================
@@ -250,7 +372,7 @@ class ApplicationResolver:
         if not name:
             return 0.0
 
-        # Exact should normally be handled earlier.
+        # Exact match is handled separately.
         if name == query:
             return 1.0
 
@@ -267,10 +389,15 @@ class ApplicationResolver:
         # --------------------------------------------------
 
         if query_tokens:
+
             overlap = (
-                len(query_tokens & name_tokens)
+                len(
+                    query_tokens
+                    & name_tokens
+                )
                 / len(query_tokens)
             )
+
         else:
             overlap = 0.0
 
@@ -282,6 +409,7 @@ class ApplicationResolver:
 
         if name.startswith(query):
             prefix_score = 0.92
+
         elif query.startswith(name):
             prefix_score = 0.85
 
@@ -293,6 +421,7 @@ class ApplicationResolver:
 
         if query in name:
             substring_score = 0.82
+
         elif name in query:
             substring_score = 0.76
 
