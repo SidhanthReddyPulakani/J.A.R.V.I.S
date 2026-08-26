@@ -103,9 +103,6 @@ class MainWindow(QWidget):
         screen = self.screen()
 
         if screen is None:
-            screen = self.windowHandle().screen()
-
-        if screen is None:
             return
 
         geometry = screen.availableGeometry()
@@ -129,7 +126,46 @@ class MainWindow(QWidget):
         self.move(x, y)
 
     # ======================================================
-    # DESKTOP Z-ORDER
+    # DESKTOP WINDOW STYLE
+    # ======================================================
+
+    def configure_desktop_window(self):
+
+        hwnd = int(
+            self.winId()
+        )
+
+        user32 = ctypes.windll.user32
+
+        # --------------------------------------------------
+        # Extended window styles
+        # --------------------------------------------------
+
+        GWL_EXSTYLE = -20
+
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_APPWINDOW = 0x00040000
+
+        ex_style = user32.GetWindowLongW(
+            hwnd,
+            GWL_EXSTYLE
+        )
+
+        # Remove APPWINDOW so Windows does not treat this
+        # as a normal task-switcher/taskbar application.
+        ex_style &= ~WS_EX_APPWINDOW
+
+        # TOOLWINDOW keeps it out of Alt+Tab/taskbar.
+        ex_style |= WS_EX_TOOLWINDOW
+
+        user32.SetWindowLongW(
+            hwnd,
+            GWL_EXSTYLE,
+            ex_style
+        )
+
+    # ======================================================
+    # PUT ON DESKTOP
     # ======================================================
 
     def put_on_desktop(self):
@@ -145,7 +181,6 @@ class MainWindow(QWidget):
         SWP_NOSIZE = 0x0001
         SWP_NOMOVE = 0x0002
         SWP_NOACTIVATE = 0x0010
-        SWP_SHOWWINDOW = 0x0040
 
         user32.SetWindowPos(
             hwnd,
@@ -157,7 +192,6 @@ class MainWindow(QWidget):
             SWP_NOSIZE
             | SWP_NOMOVE
             | SWP_NOACTIVATE
-            | SWP_SHOWWINDOW
         )
 
     # ======================================================
@@ -170,9 +204,15 @@ class MainWindow(QWidget):
 
         self.move_to_desktop()
 
-        # Give Windows a moment to create the native
-        # window, then force it to the bottom of the
-        # normal window Z-order.
+        # Configure the native window as a desktop
+        # utility window before changing its Z-order.
+        self.configure_desktop_window()
+
+        # Put it underneath normal application windows.
+        #
+        # IMPORTANT:
+        # We intentionally do NOT use SWP_SHOWWINDOW here.
+        # Qt has already shown the window.
         self.put_on_desktop()
 
     # ======================================================

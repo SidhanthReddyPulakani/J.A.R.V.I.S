@@ -13,34 +13,107 @@ from jarvis.features.apps.models import (
 
 class ApplicationLauncher:
     """
-    Launches resolved applications.
+    Launches resolved applications using the appropriate
+    Windows mechanism for their target type.
     """
 
     def launch(
         self,
         application: Application,
     ) -> bool:
-        """
-        Attempt to launch an application.
-
-        Returns True when Windows accepts the launch request.
-        """
 
         try:
-            if application.application_type in {
-                ApplicationType.EXECUTABLE,
-                ApplicationType.COMMAND,
-            }:
-                os.startfile(application.target)
+
+            # ------------------------------------------
+            # Executables
+            # ------------------------------------------
+
+            if (
+                application.application_type
+                == ApplicationType.EXECUTABLE
+            ):
+
+                os.startfile(
+                    application.target
+                )
 
                 return True
 
-            if application.application_type == ApplicationType.URI:
-                os.startfile(application.target)
+            # ------------------------------------------
+            # .lnk shortcuts
+            # ------------------------------------------
+
+            if (
+                application.application_type
+                == ApplicationType.SHORTCUT
+            ):
+
+                os.startfile(
+                    application.target
+                )
+
+                return True
+
+            # ------------------------------------------
+            # Windows URI
+            # ------------------------------------------
+
+            if (
+                application.application_type
+                == ApplicationType.URI
+            ):
+
+                os.startfile(
+                    application.target
+                )
+
+                return True
+
+            # ------------------------------------------
+            # Packaged / Store applications
+            # ------------------------------------------
+
+            if (
+                application.application_type
+                == ApplicationType.PACKAGED
+            ):
+
+                subprocess.Popen(
+                    [
+                        "explorer.exe",
+                        application.target,
+                    ],
+                    creationflags=(
+                        subprocess.CREATE_NO_WINDOW
+                    ),
+                )
+
+                return True
+
+            # ------------------------------------------
+            # Generic command
+            # ------------------------------------------
+
+            if (
+                application.application_type
+                == ApplicationType.COMMAND
+            ):
+
+                subprocess.Popen(
+                    application.target,
+                    shell=True,
+                    creationflags=(
+                        subprocess.CREATE_NO_WINDOW
+                    ),
+                )
 
                 return True
 
             return False
 
-        except OSError:
+        except (
+            OSError,
+            subprocess.SubprocessError,
+        ):
+
             return False

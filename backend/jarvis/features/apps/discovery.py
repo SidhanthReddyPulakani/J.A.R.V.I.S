@@ -1,11 +1,17 @@
 """
 Windows application discovery.
 
-Discovery finds applications available to the user without
-launching them.
+Discovery sources:
+
+1. Start Menu shortcuts/executables
+2. Windows registered Start Apps / packaged applications
+
+Discovery never launches applications.
 """
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
 from jarvis.features.apps.models import (
@@ -16,20 +22,33 @@ from jarvis.features.apps.models import (
 
 class ApplicationDiscovery:
     """
-    Discovers Windows applications from supported locations.
+    Discovers applications available to the user.
     """
 
     def discover(self) -> list[Application]:
-        """
-        Perform a fresh application discovery.
-        """
 
         applications: list[Application] = []
+
+        # ----------------------------------------------
+        # Traditional Start Menu applications
+        # ----------------------------------------------
 
         for directory in self._start_menu_directories():
             applications.extend(
                 self._scan_directory(directory)
             )
+
+        # ----------------------------------------------
+        # Windows registered / packaged applications
+        # ----------------------------------------------
+
+        applications.extend(
+            self._discover_registered_apps()
+        )
+
+        # ----------------------------------------------
+        # Clean up
+        # ----------------------------------------------
 
         applications = self._remove_invalid(
             applications
@@ -48,14 +67,11 @@ class ApplicationDiscovery:
 
         return applications
 
-    # --------------------------------------------------
-    # Discovery locations
-    # --------------------------------------------------
+    # ==================================================
+    # Start Menu
+    # ==================================================
 
     def _start_menu_directories(self) -> list[Path]:
-        """
-        Return available Windows Start Menu locations.
-        """
 
         directories: list[Path] = []
 
@@ -85,17 +101,10 @@ class ApplicationDiscovery:
             directories
         )
 
-    # --------------------------------------------------
-    # Directory scanning
-    # --------------------------------------------------
-
     def _scan_directory(
         self,
         directory: Path,
     ) -> list[Application]:
-        """
-        Recursively scan a Start Menu directory.
-        """
 
         applications: list[Application] = []
 
@@ -115,6 +124,7 @@ class ApplicationDiscovery:
             suffix = path.suffix.lower()
 
             if suffix == ".lnk":
+
                 application = (
                     self._from_shortcut(path)
                 )
@@ -125,6 +135,7 @@ class ApplicationDiscovery:
                     )
 
             elif suffix == ".exe":
+
                 application = (
                     self._from_executable(path)
                 )
@@ -136,19 +147,14 @@ class ApplicationDiscovery:
 
         return applications
 
-    # --------------------------------------------------
-    # Application creation
-    # --------------------------------------------------
+    # ==================================================
+    # Traditional application creation
+    # ==================================================
 
     def _from_shortcut(
         self,
         path: Path,
     ) -> Application | None:
-        """
-        Create an Application from a Windows shortcut.
-
-        The shortcut itself is retained as the launch target.
-        """
 
         name = self._clean_name(
             path.stem
@@ -160,7 +166,7 @@ class ApplicationDiscovery:
         return Application(
             name=name,
             target=str(path),
-            application_type=ApplicationType.COMMAND,
+            application_type=ApplicationType.SHORTCUT,
             source="start_menu_shortcut",
         )
 
@@ -168,9 +174,6 @@ class ApplicationDiscovery:
         self,
         path: Path,
     ) -> Application | None:
-        """
-        Create an Application from an executable.
-        """
 
         name = self._clean_name(
             path.stem
@@ -186,23 +189,135 @@ class ApplicationDiscovery:
             source="start_menu_executable",
         )
 
-    # --------------------------------------------------
+    # ==================================================
+    # Windows registered applications
+    # ==================================================
+
+    def _discover_registered_apps(
+        self,
+    ) -> list[Application]:
+
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "Get-StartApps | "
+                "Select-Object Name, AppID | "
+                "ConvertTo-Json -Compress"
+            ),
+        ]
+
+        try:
+
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW
+                ),
+            )
+
+        except (
+            OSError,
+            subprocess.SubprocessError,
+        ):
+
+            return []
+
+        if result.returncode != 0:
+            return []
+
+        output = result.stdout.strip()
+
+        if not output:
+            return []
+
+        try:
+            data = json.loads(output)
+
+        except json.JSONDecodeError:
+            return []
+
+        if isinstance(data, dict):
+            data = [data]
+
+        applications: list[Application] = []
+
+        for item in data:
+
+            if not isinstance(item, dict):
+                continue
+
+            name = item.get("Name")
+            app_id = item.get("AppID")
+
+            if not name or not app_id:
+                continue
+
+            name = self._clean_name(
+                str(name)
+            )
+
+            app_id = str(app_id).strip()
+
+            if not name or not app_id:
+                continue
+
+            # Packaged Windows applications normally expose
+            # an AppID containing '!'.
+            #
+            # We deliberately filter these here so that
+            # ordinary Win32 applications aren't duplicated
+            # with our Start Menu discovery.
+            if "!" not in app_id:
+                continue
+
+            target = (
+                "shell:AppsFolder\\"
+                + app_id
+            )
+
+            applications.append(
+                Application(
+                    name=name,
+                    target=target,
+                    application_type=(
+                        ApplicationType.PACKAGED
+                    ),
+                    source="windows_start_apps",
+                )
+            )
+
+        return applications
+
+    # ==================================================
     # Validation
-    # --------------------------------------------------
+    # ==================================================
 
     def _remove_invalid(
         self,
         applications: list[Application],
     ) -> list[Application]:
-        """
-        Remove entries whose launch target no longer exists.
-        """
 
         valid: list[Application] = []
 
         for application in applications:
 
+            # Windows shell targets do not correspond
+            # to normal filesystem paths.
+            if application.application_type in {
+                ApplicationType.PACKAGED,
+                ApplicationType.URI,
+            }:
+                valid.append(application)
+                continue
+
             try:
+
                 target = Path(
                     application.target
                 )
@@ -210,44 +325,40 @@ class ApplicationDiscovery:
                 if not target.exists():
                     continue
 
-            except (OSError, ValueError):
+            except (
+                OSError,
+                ValueError,
+            ):
                 continue
 
-            valid.append(
-                application
-            )
+            valid.append(application)
 
         return valid
 
-    # --------------------------------------------------
+    # ==================================================
     # Deduplication
-    # --------------------------------------------------
+    # ==================================================
 
     def _deduplicate(
         self,
         applications: list[Application],
     ) -> list[Application]:
-        """
-        Remove duplicate applications.
 
-        The target path is the strongest identity.
-        """
+        seen: set[tuple[str, str]] = set()
 
-        seen_targets: set[str] = set()
         result: list[Application] = []
 
         for application in applications:
 
-            target_key = self._normalize_path(
-                application.target
+            key = (
+                application.normalized_name,
+                application.target.strip().lower(),
             )
 
-            if target_key in seen_targets:
+            if key in seen:
                 continue
 
-            seen_targets.add(
-                target_key
-            )
+            seen.add(key)
 
             result.append(
                 application
@@ -255,45 +366,23 @@ class ApplicationDiscovery:
 
         return result
 
-    # --------------------------------------------------
+    # ==================================================
     # Helpers
-    # --------------------------------------------------
+    # ==================================================
 
     @staticmethod
     def _clean_name(
         name: str,
     ) -> str:
-        """
-        Normalize an application display name.
-        """
 
         return " ".join(
             name.strip().split()
         )
 
     @staticmethod
-    def _normalize_path(
-        path: str,
-    ) -> str:
-        """
-        Normalize a Windows path for comparison.
-        """
-
-        try:
-            return str(
-                Path(path)
-                .resolve()
-            ).lower()
-        except OSError:
-            return path.strip().lower()
-
-    @staticmethod
     def _unique_paths(
         paths: list[Path],
     ) -> list[Path]:
-        """
-        Remove duplicate directory paths.
-        """
 
         seen: set[str] = set()
         result: list[Path] = []

@@ -1,14 +1,12 @@
-"""
-Application models used by the Jarvis application manager.
-"""
-
 from dataclasses import dataclass
 from enum import Enum
 
 
 class ApplicationType(str, Enum):
     EXECUTABLE = "executable"
+    SHORTCUT = "shortcut"
     URI = "uri"
+    PACKAGED = "packaged"
     COMMAND = "command"
     UNKNOWN = "unknown"
 

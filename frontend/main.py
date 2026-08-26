@@ -12,54 +12,31 @@ from system.tray import JarvisTray
 
 def main():
 
-    app = QApplication(
-        sys.argv
-    )
+    app = QApplication(sys.argv)
 
-    # --------------------------------------------------
-    # Main interface
-    # --------------------------------------------------
+    print("[MAIN] QApplication created")
 
     window = MainWindow()
 
-    # --------------------------------------------------
-    # Overlay interface
-    # --------------------------------------------------
+    print("[MAIN] MainWindow created")
+    print("[MAIN] visible:", window.isVisible())
+    print("[MAIN] geometry:", window.geometry())
 
     overlay = OverlayWindow()
 
-    # --------------------------------------------------
-    # ONE Jarvis controller
-    # --------------------------------------------------
+    print("[MAIN] Overlay created")
 
-    controller = JarvisController(
-        window
-    )
+    controller = JarvisController(window)
 
-    # Attach controller to main interface.
-    window.set_controller(
-        controller
-    )
+    print("[MAIN] Controller created")
 
-    # Attach controller to overlay.
-    overlay.set_controller(
-        controller
-    )
+    window.set_controller(controller)
+    overlay.set_controller(controller)
+    controller.set_overlay(overlay)
 
-    # Let controller broadcast to overlay.
-    controller.set_overlay(
-        overlay
-    )
-
-    # Keep references alive.
     window.overlay = overlay
     window.jarvis_controller = controller
-
     overlay.jarvis_controller = controller
-
-    # --------------------------------------------------
-    # Global hotkey
-    # --------------------------------------------------
 
     hotkeys = HotkeyManager()
 
@@ -67,60 +44,31 @@ def main():
         overlay.toggle
     )
 
-    # Keep the hotkey manager alive.
     window.hotkeys = hotkeys
 
-    # --------------------------------------------------
-    # System tray
-    # --------------------------------------------------
-
-    tray = JarvisTray(
-        controller
-    )
-
-    # Keep the tray alive.
+    tray = JarvisTray(controller)
     window.tray = tray
 
-    # --------------------------------------------------
-    # Show permanent main interface
-    # --------------------------------------------------
+    print("[MAIN] About to show MainWindow")
 
     window.show()
 
-    # --------------------------------------------------
-    # Start Jarvis
-    # --------------------------------------------------
+    print("[MAIN] MainWindow.show() returned")
+    print("[MAIN] visible after show:", window.isVisible())
+    print("[MAIN] geometry after show:", window.geometry())
 
     controller.start()
 
-    # --------------------------------------------------
-    # Start global hotkey
-    # --------------------------------------------------
-
     hotkeys.start()
-
-    # --------------------------------------------------
-    # Show tray
-    # --------------------------------------------------
-
     tray.show()
 
-    # --------------------------------------------------
-    # Run Qt
-    # --------------------------------------------------
+    print("[MAIN] Starting Qt event loop")
 
     exit_code = app.exec()
 
-    # --------------------------------------------------
-    # Clean up
-    # --------------------------------------------------
-
     hotkeys.stop()
 
-    sys.exit(
-        exit_code
-    )
-
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()
