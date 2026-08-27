@@ -5,7 +5,7 @@ This module contains the SQL required to create the initial
 Jarvis database structure.
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 SCHEMA_SQL = """
@@ -17,6 +17,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -49,6 +50,7 @@ ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at
 ON messages(created_at);
 
+
 -- --------------------------------------------------
 -- Agent State
 -- --------------------------------------------------
@@ -74,6 +76,8 @@ CREATE TABLE IF NOT EXISTS agent_state (
         REFERENCES conversations(id)
         ON DELETE SET NULL
 );
+
+
 -- --------------------------------------------------
 -- Core Memory
 -- --------------------------------------------------
@@ -114,12 +118,16 @@ ON core_memory_blocks(
     agent_id,
     priority
 );
+
+
 -- --------------------------------------------------
--- Memories
+-- Long-Term Memory
 -- --------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    agent_id TEXT NOT NULL DEFAULT 'jarvis',
 
     content TEXT NOT NULL,
 
@@ -127,11 +135,52 @@ CREATE TABLE IF NOT EXISTS memories (
     subject TEXT,
     project TEXT,
 
-    importance REAL DEFAULT 0.5,
-    confidence REAL DEFAULT 1.0,
+    importance REAL NOT NULL DEFAULT 0.5,
+    confidence REAL NOT NULL DEFAULT 1.0,
+
+    status TEXT NOT NULL DEFAULT 'active',
+
+    superseded_by_id INTEGER,
 
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+
+    CHECK (
+        importance >= 0.0
+        AND importance <= 1.0
+    ),
+
+    CHECK (
+        confidence >= 0.0
+        AND confidence <= 1.0
+    ),
+
+    CHECK (
+        status IN (
+            'active',
+            'superseded'
+        )
+    ),
+
+    CHECK (
+        superseded_by_id IS NULL
+        OR superseded_by_id != id
+    ),
+
+    FOREIGN KEY (superseded_by_id)
+        REFERENCES memories(id)
+        ON DELETE RESTRICT
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_memories_agent
+ON memories(agent_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_memories_agent_status
+ON memories(
+    agent_id,
+    status
 );
 
 
