@@ -2,6 +2,8 @@ from jarvis.core.context import ContextManager
 
 from jarvis.state.models import AgentState
 
+from jarvis.memory import MemoryBlock
+
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Be concise and conversational.
@@ -27,7 +29,28 @@ def main() -> None:
             "content": "What are we working on?",
         },
     ]
-
+    core_memory = [
+        MemoryBlock(
+            id=1,
+            agent_id="test-jarvis",
+            label="human",
+            content="Name: Sidhanth",
+            capacity=2000,
+            priority=10,
+            writable=True,
+        ),
+        MemoryBlock(
+            id=2,
+            agent_id="test-jarvis",
+            label="persona",
+            content=(
+                "Jarvis is a local personal assistant."
+            ),
+            capacity=2000,
+            priority=20,
+            writable=True,
+        ),
+    ]
     manager = ContextManager(
         system_prompt=SYSTEM_PROMPT
     )
@@ -35,6 +58,7 @@ def main() -> None:
     context = manager.build(
         state=state,
         conversation=conversation,
+        core_memory=core_memory,
     )
 
     messages = context.as_messages()
@@ -59,7 +83,18 @@ def main() -> None:
         "Jarvis"
         in system_message["content"]
     )
+    system_content = (
+        context.as_messages()[0]["content"]
+    )
 
+    assert "CORE MEMORY" in system_content
+    assert "Name: Sidhanth" in system_content
+    assert (
+        "Jarvis is a local personal assistant."
+        in system_content
+    )
+    assert "[human]" in system_content
+    assert "[persona]" in system_content
     assert (
         messages[1]["content"]
         == "What are we working on?"

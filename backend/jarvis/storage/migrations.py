@@ -98,7 +98,6 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
 
     connection.commit()
 
-
 def migrate_to_v2(connection: sqlite3.Connection) -> None:
     """
     Upgrade an existing v1 database to v2.
@@ -139,13 +138,77 @@ def migrate_to_v2(connection: sqlite3.Connection) -> None:
 
     connection.commit()
 
+def migrate_to_v3(
+    connection: sqlite3.Connection,
+) -> None:
+    """
+    Upgrade an existing v2 database to v3.
+
+    v3 introduces persistent Core Memory blocks.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core_memory_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            agent_id TEXT NOT NULL,
+
+            label TEXT NOT NULL,
+
+            content TEXT NOT NULL DEFAULT '',
+
+            capacity INTEGER NOT NULL DEFAULT 2000,
+
+            priority INTEGER NOT NULL DEFAULT 100,
+
+            writable INTEGER NOT NULL DEFAULT 1,
+
+            created_at TEXT NOT NULL,
+
+            updated_at TEXT NOT NULL,
+
+            UNIQUE(agent_id, label),
+
+            FOREIGN KEY (agent_id)
+                REFERENCES agent_state(agent_id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_core_memory_agent
+        ON core_memory_blocks(agent_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_core_memory_priority
+        ON core_memory_blocks(
+            agent_id,
+            priority
+        )
+        """
+    )
+
+    record_schema_version(
+        connection,
+        3,
+    )
+
+    connection.commit()
 
 def migrate(connection: sqlite3.Connection) -> None:
     """
     Apply all required database migrations.
     """
 
-    current_version = get_schema_version(connection)
+    current_version = get_schema_version(
+        connection
+    )
 
     if current_version == 0:
         initialize_schema(connection)
@@ -154,6 +217,10 @@ def migrate(connection: sqlite3.Connection) -> None:
     if current_version == 1:
         migrate_to_v2(connection)
         current_version = 2
+
+    if current_version == 2:
+        migrate_to_v3(connection)
+        current_version = 3
 
     if current_version > SCHEMA_VERSION:
         raise RuntimeError(
@@ -168,3 +235,4 @@ def migrate(connection: sqlite3.Connection) -> None:
             f"database={current_version}, "
             f"expected={SCHEMA_VERSION}"
         )
+    

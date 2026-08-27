@@ -24,7 +24,7 @@ def main():
     for row in tables:
         print(" -", row[0])
 
-    for table in ["agent_state", "conversations", "messages"]:
+    for table in ["agent_state", "conversations", "messages","core_memory_blocks",]:
         print(f"\n--- {table} ---")
 
         rows = db.fetch_all(

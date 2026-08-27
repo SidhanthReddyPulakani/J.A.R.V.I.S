@@ -25,7 +25,7 @@ class ContextRequest:
         default_factory=list
     )
 
-    working_memory: list[Any] = field(
+    core_memory: list[Any] = field(
         default_factory=list
     )
 

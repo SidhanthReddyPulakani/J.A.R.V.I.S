@@ -5,7 +5,7 @@ This module contains the SQL required to create the initial
 Jarvis database structure.
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 SCHEMA_SQL = """
@@ -73,6 +73,46 @@ CREATE TABLE IF NOT EXISTS agent_state (
     FOREIGN KEY (conversation_id)
         REFERENCES conversations(id)
         ON DELETE SET NULL
+);
+-- --------------------------------------------------
+-- Core Memory
+-- --------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS core_memory_blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    agent_id TEXT NOT NULL,
+
+    label TEXT NOT NULL,
+
+    content TEXT NOT NULL DEFAULT '',
+
+    capacity INTEGER NOT NULL DEFAULT 2000,
+
+    priority INTEGER NOT NULL DEFAULT 100,
+
+    writable INTEGER NOT NULL DEFAULT 1,
+
+    created_at TEXT NOT NULL,
+
+    updated_at TEXT NOT NULL,
+
+    UNIQUE(agent_id, label),
+
+    FOREIGN KEY (agent_id)
+        REFERENCES agent_state(agent_id)
+        ON DELETE CASCADE
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_core_memory_agent
+ON core_memory_blocks(agent_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_core_memory_priority
+ON core_memory_blocks(
+    agent_id,
+    priority
 );
 -- --------------------------------------------------
 -- Memories

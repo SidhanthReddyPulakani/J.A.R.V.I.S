@@ -39,6 +39,7 @@ class ContextManager:
         *,
         state,
         conversation,
+        core_memory=(),
     ) -> AgentContext:
 
         request = ContextRequest(
@@ -46,6 +47,9 @@ class ContextManager:
             state=state,
             conversation=list(
                 conversation
+            ),
+            core_memory=list(
+                core_memory
             ),
         )
 

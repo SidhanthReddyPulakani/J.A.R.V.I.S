@@ -16,6 +16,11 @@ from jarvis.storage.repositories.conversations import (
     ConversationRepository,
 )
 
+from jarvis.memory import CoreMemoryService
+from jarvis.storage.repositories.core_memory import (
+    CoreMemoryRepository,
+)
+
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
@@ -76,6 +81,14 @@ class JarvisAgent:
             system_prompt=SYSTEM_PROMPT
         )
 
+        self.core_memory = CoreMemoryService(
+            CoreMemoryRepository(
+                self.database
+            ),
+            agent_id=self.AGENT_ID,
+        )
+        self.core_memory.ensure_default_blocks()
+
         self.context_window = ContextWindowManager()
 
 
@@ -96,27 +109,17 @@ class JarvisAgent:
                 }
             )
     def _build_context(self):
-        """
-        Compile the temporary context for the current
-        reasoning step.
-        """
 
-        request = ContextRequest(
-            user_input="",
+        core_memory = (
+            self.core_memory.list_blocks()
+        )
+
+        return self.context_manager.build(
             state=self.state,
-            conversation=list(
-                self.messages
-            ),
+            conversation=self.messages,
+            core_memory=core_memory,
         )
-
-        compiled = self.context_compiler.compile(
-            request
-        )
-
-        return self.context_window.prepare(
-            compiled
-        )
-
+    
     def run(self, user_input: str) -> str:
         user_message = {
             "role": "user",

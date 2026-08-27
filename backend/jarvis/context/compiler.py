@@ -52,13 +52,81 @@ class ContextCompiler:
             messages=messages
         )
 
+    @staticmethod
+    def _format_core_memory(
+        blocks: Iterable[Any],
+    ) -> str:
+        """
+        Format Core Memory blocks for the LLM context.
+        """
+
+        sections: list[str] = []
+
+        for block in blocks:
+
+            label = getattr(
+                block,
+                "label",
+                None,
+            )
+
+            content = getattr(
+                block,
+                "content",
+                "",
+            )
+
+            capacity = getattr(
+                block,
+                "capacity",
+                None,
+            )
+
+            if label is None:
+                continue
+
+            if capacity:
+                usage = len(content)
+
+                header = (
+                    f"[{label}] "
+                    f"{usage}/{capacity} characters"
+                )
+
+            else:
+                header = f"[{label}]"
+
+            sections.append(
+                f"{header}\n"
+                f"{content}"
+            )
+
+        if not sections:
+            return "No Core Memory blocks."
+
+        return "\n\n".join(
+            sections
+        )
+
     def _build_system_context(
         self,
         request: ContextRequest,
     ) -> str:
         """
         Build the system-level portion of context.
+
+        Ordering:
+
+            System Instructions
+            Core Memory
+            Current Agent State
         """
+
+        core_memory_block = (
+            self._format_core_memory(
+                request.core_memory
+            )
+        )
 
         state_block = self._format_state(
             request.state
@@ -66,6 +134,11 @@ class ContextCompiler:
 
         return (
             f"{self.system_prompt}\n\n"
+
+            "CORE MEMORY\n"
+            "-----------\n"
+            f"{core_memory_block}\n\n"
+
             "CURRENT AGENT STATE\n"
             "------------------\n"
             f"{state_block}"
