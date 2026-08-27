@@ -2,6 +2,11 @@
 Context compiler.
 
 Transforms ContextRequest into an AgentContext.
+
+The compiler is responsible for deciding how supplied
+information is represented in the LLM context.
+
+It does not perform retrieval or persistence.
 """
 
 from typing import Any, Iterable
@@ -31,13 +36,17 @@ class ContextCompiler:
         Compile a ContextRequest into an AgentContext.
         """
 
-        messages: list[dict[str, Any]] = []
+        messages: list[
+            dict[str, Any]
+        ] = []
 
         messages.append(
             {
                 "role": "system",
-                "content": self._build_system_context(
-                    request
+                "content": (
+                    self._build_system_context(
+                        request
+                    )
                 ),
             }
         )
@@ -50,6 +59,77 @@ class ContextCompiler:
 
         return AgentContext(
             messages=messages
+        )
+
+    def _build_system_context(
+        self,
+        request: ContextRequest,
+    ) -> str:
+        """
+        Build the system-level portion of context.
+
+        Information is deliberately separated into sections
+        so the LLM can distinguish persistent memory,
+        retrieved information, and current state.
+        """
+
+        sections: list[str] = []
+
+        sections.append(
+            self.system_prompt
+        )
+
+        # --------------------------------------------------
+        # Core Memory
+        # --------------------------------------------------
+
+        if request.core_memory:
+
+            sections.extend(
+                [
+                    "",
+                    "CORE MEMORY",
+                    "-----------",
+                    self._format_core_memory(
+                        request.core_memory
+                    ),
+                ]
+            )
+
+        # --------------------------------------------------
+        # Retrieved information
+        # --------------------------------------------------
+
+        if request.retrieval_results:
+
+            sections.extend(
+                [
+                    "",
+                    "RETRIEVED INFORMATION",
+                    "----------------------",
+                    self._format_retrieval_results(
+                        request.retrieval_results
+                    ),
+                ]
+            )
+
+        # --------------------------------------------------
+        # Agent State
+        # --------------------------------------------------
+
+        sections.extend(
+            [
+                "",
+                "CURRENT AGENT STATE",
+                "------------------",
+                self._format_state(
+                    request.state
+                ),
+            ]
+        )
+
+        return "\n".join(
+            sections
         )
 
     @staticmethod
@@ -85,8 +165,15 @@ class ContextCompiler:
             if label is None:
                 continue
 
+            content = str(
+                content or ""
+            )
+
             if capacity:
-                usage = len(content)
+
+                usage = len(
+                    content
+                )
 
                 header = (
                     f"[{label}] "
@@ -94,7 +181,10 @@ class ContextCompiler:
                 )
 
             else:
-                header = f"[{label}]"
+
+                header = (
+                    f"[{label}]"
+                )
 
             sections.append(
                 f"{header}\n"
@@ -102,46 +192,92 @@ class ContextCompiler:
             )
 
         if not sections:
-            return "No Core Memory blocks."
+            return (
+                "No Core Memory blocks."
+            )
 
         return "\n\n".join(
             sections
         )
 
-    def _build_system_context(
-        self,
-        request: ContextRequest,
+    @staticmethod
+    def _format_retrieval_results(
+        results: Iterable[Any],
     ) -> str:
         """
-        Build the system-level portion of context.
+        Format normalized RetrievalResult objects.
 
-        Ordering:
-
-            System Instructions
-            Core Memory
-            Current Agent State
+        Retrieval remains a separate conceptual layer.
+        The compiler only consumes its output.
         """
 
-        core_memory_block = (
-            self._format_core_memory(
-                request.core_memory
+        sections: list[str] = []
+
+        for result in results:
+
+            source = getattr(
+                result,
+                "source",
+                "unknown",
             )
-        )
 
-        state_block = self._format_state(
-            request.state
-        )
+            content = getattr(
+                result,
+                "content",
+                "",
+            )
 
-        return (
-            f"{self.system_prompt}\n\n"
+            score = getattr(
+                result,
+                "score",
+                None,
+            )
 
-            "CORE MEMORY\n"
-            "-----------\n"
-            f"{core_memory_block}\n\n"
+            identifier = getattr(
+                result,
+                "identifier",
+                None,
+            )
 
-            "CURRENT AGENT STATE\n"
-            "------------------\n"
-            f"{state_block}"
+            content = str(
+                content or ""
+            ).strip()
+
+            if not content:
+                continue
+
+            if score is None:
+
+                header = (
+                    f"[{source}]"
+                )
+
+            else:
+
+                header = (
+                    f"[{source}] "
+                    f"score={float(score):.3f}"
+                )
+
+            if identifier is not None:
+
+                header += (
+                    f" id={identifier}"
+                )
+
+            sections.append(
+                f"{header}\n"
+                f"{content}"
+            )
+
+        if not sections:
+
+            return (
+                "No retrieved information."
+            )
+
+        return "\n\n".join(
+            sections
         )
 
     @staticmethod
@@ -181,7 +317,9 @@ class ContextCompiler:
             ),
         ]
 
-        return "\n".join(lines)
+        return "\n".join(
+            lines
+        )
 
     @staticmethod
     def _normalize_messages(
@@ -189,16 +327,26 @@ class ContextCompiler:
     ) -> list[dict[str, Any]]:
         """
         Normalize conversation entries into LLM messages.
+
+        Existing Ollama message objects are converted into
+        dictionaries where possible.
         """
 
-        normalized: list[dict[str, Any]] = []
+        normalized: list[
+            dict[str, Any]
+        ] = []
 
         for message in conversation:
 
-            if isinstance(message, dict):
+            if isinstance(
+                message,
+                dict,
+            ):
+
                 normalized.append(
                     dict(message)
                 )
+
                 continue
 
             role = getattr(
@@ -216,7 +364,10 @@ class ContextCompiler:
             if role is None:
                 continue
 
-            item: dict[str, Any] = {
+            item: dict[
+                str,
+                Any,
+            ] = {
                 "role": role,
                 "content": content or "",
             }
@@ -228,8 +379,13 @@ class ContextCompiler:
             )
 
             if tool_calls:
-                item["tool_calls"] = tool_calls
 
-            normalized.append(item)
+                item[
+                    "tool_calls"
+                ] = tool_calls
+
+            normalized.append(
+                item
+            )
 
         return normalized

@@ -2,6 +2,8 @@
 Repository for persistent Long-Term Memory.
 """
 
+from __future__ import annotations
+
 from jarvis.memory.models import (
     LongTermMemory,
 )
@@ -284,6 +286,127 @@ class LongTermMemoryRepository(
                     replacement.updated_at,
                     existing.id,
                     existing.agent_id,
+                ),
+            )
+
+            return replacement_id
+
+    def consolidate(
+        self,
+        existing_memories: list[LongTermMemory],
+        replacement: LongTermMemory,
+    ) -> int:
+        """
+        Atomically create one replacement memory and
+        supersede all supplied active memories.
+
+        All original memories remain persisted as
+        superseded historical records.
+        """
+
+        if len(existing_memories) < 2:
+
+            raise ValueError(
+                "Consolidation requires at least "
+                "two existing memories."
+            )
+
+        memory_ids: list[int] = []
+
+        for memory in existing_memories:
+
+            if memory.id is None:
+
+                raise ValueError(
+                    "Cannot consolidate a memory "
+                    "without an ID."
+                )
+
+            if memory.agent_id != replacement.agent_id:
+
+                raise ValueError(
+                    "All memories must belong to "
+                    "the same agent."
+                )
+
+            if memory.status != "active":
+
+                raise ValueError(
+                    "Only active memories can "
+                    "be consolidated."
+                )
+
+            memory_ids.append(
+                memory.id
+            )
+
+        if len(set(memory_ids)) != len(memory_ids):
+
+            raise ValueError(
+                "Consolidation memory IDs must "
+                "be unique."
+            )
+
+        with self.database.connection() as connection:
+
+            cursor = connection.execute(
+                """
+                INSERT INTO memories (
+                    agent_id,
+                    content,
+                    category,
+                    subject,
+                    project,
+                    importance,
+                    confidence,
+                    status,
+                    superseded_by_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?,
+                    ?, 'active', NULL, ?, ?
+                )
+                """,
+                (
+                    replacement.agent_id,
+                    replacement.content,
+                    replacement.category,
+                    replacement.subject,
+                    replacement.project,
+                    replacement.importance,
+                    replacement.confidence,
+                    replacement.created_at,
+                    replacement.updated_at,
+                ),
+            )
+
+            replacement_id = int(
+                cursor.lastrowid
+            )
+
+            placeholders = ", ".join(
+                "?"
+                for _ in memory_ids
+            )
+
+            connection.execute(
+                f"""
+                UPDATE memories
+                SET
+                    status = 'superseded',
+                    superseded_by_id = ?,
+                    updated_at = ?
+                WHERE id IN ({placeholders})
+                  AND agent_id = ?
+                  AND status = 'active'
+                """,
+                (
+                    replacement_id,
+                    replacement.updated_at,
+                    *memory_ids,
+                    replacement.agent_id,
                 ),
             )
 

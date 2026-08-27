@@ -15,6 +15,14 @@ class ContextRequest:
     Inputs available to the Context Compiler.
 
     Not every field has to be populated for every request.
+
+    Retrieval results are passed separately from the underlying
+    information stores. This preserves the architectural
+    distinction between:
+
+        storage     -> persistent information
+        retrieval   -> relevant information
+        context     -> compiled information for the LLM
     """
 
     user_input: str
@@ -53,6 +61,10 @@ class ContextRequest:
         default_factory=list
     )
 
+    retrieval_results: list[Any] = field(
+        default_factory=list
+    )
+
 
 @dataclass
 class AgentContext:
@@ -66,9 +78,13 @@ class AgentContext:
         default_factory=list
     )
 
-    def as_messages(self) -> list[dict[str, Any]]:
+    def as_messages(
+        self,
+    ) -> list[dict[str, Any]]:
         """
         Return a copy of the compiled messages.
         """
 
-        return list(self.messages)
+        return list(
+            self.messages
+        )
