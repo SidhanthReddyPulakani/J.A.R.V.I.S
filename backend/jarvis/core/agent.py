@@ -1,11 +1,20 @@
 from ollama import ResponseError
 
 from jarvis.core.llm import LLMClient
-from jarvis.core.state import AgentState
+from jarvis.state.models import AgentState
 from jarvis.core.tools import AVAILABLE_TOOLS
 from jarvis.storage.database import database
 from jarvis.storage.repositories.agent_state import AgentStateRepository
-from jarvis.core.context import ContextManager
+from jarvis.context import (
+    ContextCompiler,
+    ContextRequest,
+    ContextWindowManager,
+)
+from jarvis.recall.service import RecallService
+
+from jarvis.storage.repositories.conversations import (
+    ConversationRepository,
+)
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
@@ -34,6 +43,9 @@ class JarvisAgent:
         self.state_repository = AgentStateRepository(
             database
         )
+        self.recall = RecallService(
+            ConversationRepository(database)
+        )
 
         self.state = (
             self.state_repository.get(
@@ -50,29 +62,75 @@ class JarvisAgent:
                 self.state
             )
 
-        self.context_manager = ContextManager(
+        if self.state.conversation_id is None:
+
+            self.state.conversation_id = (
+                self.recall
+                .create_conversation()
+            )
+
+            self.state_repository.save(
+                self.state
+            )
+        self.context_compiler = ContextCompiler(
             system_prompt=SYSTEM_PROMPT
         )
 
+        self.context_window = ContextWindowManager()
+
+
         self.messages = []
 
+        persisted_messages = (
+            self.recall.get_messages(
+                self.state.conversation_id
+            )
+        )
+
+        for message in persisted_messages:
+
+            self.messages.append(
+                {
+                    "role": message["role"],
+                    "content": message["content"],
+                }
+            )
     def _build_context(self):
         """
-        Build a fresh Context for the current reasoning step.
+        Compile the temporary context for the current
+        reasoning step.
         """
 
-        return self.context_manager.build(
+        request = ContextRequest(
+            user_input="",
             state=self.state,
-            conversation=self.messages,
-    )
-    
+            conversation=list(
+                self.messages
+            ),
+        )
+
+        compiled = self.context_compiler.compile(
+            request
+        )
+
+        return self.context_window.prepare(
+            compiled
+        )
+
     def run(self, user_input: str) -> str:
+        user_message = {
+            "role": "user",
+            "content": user_input,
+        }
 
         self.messages.append(
-            {
-                "role": "user",
-                "content": user_input,
-            }
+            user_message
+        )
+
+        self.recall.add_message(
+            self.state.conversation_id,
+            "user",
+            user_input,
         )
 
         # --------------------------------------------------
@@ -91,6 +149,13 @@ class JarvisAgent:
         self.messages.append(
             response.message
         )
+
+        if not response.message.tool_calls:
+            self.recall.add_message(
+                self.state.conversation_id,
+                "assistant",
+                response.message.content or "",
+            )
 
         # --------------------------------------------------
         # Capability/tool execution
@@ -140,7 +205,6 @@ class JarvisAgent:
                         "content": result,
                     }
                 )
-
             # --------------------------------------------------
             # Reasoning step 2
             #
@@ -159,6 +223,11 @@ class JarvisAgent:
 
             self.messages.append(
                 final.message
+            )
+            self.recall.add_message(
+                self.state.conversation_id,
+                "assistant",
+                final.message.content or "",
             )
 
             self._persist_state()

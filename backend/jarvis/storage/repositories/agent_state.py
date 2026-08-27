@@ -2,7 +2,7 @@
 Repository for persistent Agent State.
 """
 
-from jarvis.core.state import AgentState
+from jarvis.state.models import AgentState
 from jarvis.storage.repositories.base import BaseRepository
 
 

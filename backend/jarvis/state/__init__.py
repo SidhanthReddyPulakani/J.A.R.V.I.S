@@ -1,9 +1,3 @@
-"""
-Compatibility module.
-
-AgentState now belongs to jarvis.state.
-"""
-
 from jarvis.state.models import AgentState
 
 __all__ = [

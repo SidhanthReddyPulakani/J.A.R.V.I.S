@@ -1,6 +1,6 @@
 from jarvis.core.context import ContextManager
-from jarvis.core.state import AgentState
 
+from jarvis.state.models import AgentState
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
