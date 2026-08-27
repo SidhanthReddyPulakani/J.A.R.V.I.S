@@ -83,7 +83,7 @@ class JarvisAgent:
 
         self.core_memory = CoreMemoryService(
             CoreMemoryRepository(
-                self.database
+                database
             ),
             agent_id=self.AGENT_ID,
         )
@@ -109,17 +109,26 @@ class JarvisAgent:
                 }
             )
     def _build_context(self):
+        """
+        Compile the temporary context for the current
+        reasoning step.
+        """
 
-        core_memory = (
-            self.core_memory.list_blocks()
-        )
-
-        return self.context_manager.build(
+        request = ContextRequest(
+            user_input="",
             state=self.state,
-            conversation=self.messages,
-            core_memory=core_memory,
+            conversation=list(
+                self.messages
+            ),
         )
-    
+
+        compiled = self.context_compiler.compile(
+            request
+        )
+
+        return self.context_window.prepare(
+            compiled
+        )
     def run(self, user_input: str) -> str:
         user_message = {
             "role": "user",

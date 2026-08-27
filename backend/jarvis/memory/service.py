@@ -141,7 +141,7 @@ class CoreMemoryService:
             block.id
         )
 
-        def ensure_default_blocks(
+    def ensure_default_blocks(
             self,
         ) -> None:
             """

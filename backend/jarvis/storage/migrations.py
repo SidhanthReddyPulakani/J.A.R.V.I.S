@@ -311,6 +311,85 @@ def migrate_to_v4(
 
     connection.commit()
 
+def migrate_to_v5(
+    connection: sqlite3.Connection,
+) -> None:
+    """
+    Upgrade an existing v4 database to v5.
+
+    v5 introduces persistent Diary events.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diary_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            agent_id TEXT NOT NULL,
+
+            conversation_id INTEGER,
+
+            event_type TEXT NOT NULL,
+
+            description TEXT NOT NULL,
+
+            source TEXT,
+
+            metadata TEXT NOT NULL DEFAULT '{}',
+
+            created_at TEXT NOT NULL,
+
+            FOREIGN KEY (agent_id)
+                REFERENCES agent_state(agent_id)
+                ON DELETE CASCADE,
+
+            FOREIGN KEY (conversation_id)
+                REFERENCES conversations(id)
+                ON DELETE SET NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_diary_agent
+        ON diary_events(agent_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_diary_conversation
+        ON diary_events(conversation_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_diary_type
+        ON diary_events(
+            agent_id,
+            event_type
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_diary_created_at
+        ON diary_events(
+            agent_id,
+            created_at
+        )
+        """
+    )
+
+    record_schema_version(
+        connection,
+        5,
+    )
+
+    connection.commit()
 
 def migrate(
     connection: sqlite3.Connection,
@@ -356,6 +435,14 @@ def migrate(
         )
 
         current_version = 4
+
+    if current_version == 4:
+
+        migrate_to_v5(
+            connection
+        )
+
+        current_version = 5
 
     if current_version > SCHEMA_VERSION:
 

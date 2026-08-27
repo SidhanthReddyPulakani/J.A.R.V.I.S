@@ -5,7 +5,7 @@ This module contains the SQL required to create the initial
 Jarvis database structure.
 """
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 SCHEMA_SQL = """
@@ -119,6 +119,57 @@ ON core_memory_blocks(
     priority
 );
 
+-- --------------------------------------------------
+-- Diary Events
+-- --------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS diary_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    agent_id TEXT NOT NULL,
+
+    conversation_id INTEGER,
+
+    event_type TEXT NOT NULL,
+
+    description TEXT NOT NULL,
+
+    source TEXT,
+
+    metadata TEXT NOT NULL DEFAULT '{}',
+
+    created_at TEXT NOT NULL,
+
+    FOREIGN KEY (agent_id)
+        REFERENCES agent_state(agent_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (conversation_id)
+        REFERENCES conversations(id)
+        ON DELETE SET NULL
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_diary_agent
+ON diary_events(agent_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_diary_conversation
+ON diary_events(conversation_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_diary_type
+ON diary_events(
+    agent_id,
+    event_type
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_diary_created_at
+ON diary_events(
+    agent_id,
+    created_at
+);
 
 -- --------------------------------------------------
 -- Long-Term Memory
