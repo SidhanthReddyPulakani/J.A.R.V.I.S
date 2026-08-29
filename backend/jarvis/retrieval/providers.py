@@ -8,6 +8,7 @@ Providers do not own orchestration or context compilation.
 """
 
 from abc import ABC, abstractmethod
+import re
 from typing import Any
 
 from jarvis.retrieval.models import RetrievalResult
@@ -258,24 +259,22 @@ class MemoryProvider(RetrievalProvider):
 
         return scored[:limit]
 
-
 class KnowledgeProvider(RetrievalProvider):
     """
     Retrieval provider for archival Knowledge.
 
-    Knowledge is not present in the current ZIP yet.
-
-    This provider deliberately accepts an optional service so
-    Retrieval can be integrated with Knowledge later without
-    changing the RetrievalService contract.
+    KnowledgeService performs domain-level passage lookup.
+    This provider converts those passages into the common
+    RetrievalResult contract.
     """
 
     name = "knowledge"
 
     def __init__(
         self,
-        knowledge_service: Any | None = None,
+        knowledge_service: Any,
     ) -> None:
+
         self.knowledge_service = (
             knowledge_service
         )
@@ -287,74 +286,101 @@ class KnowledgeProvider(RetrievalProvider):
         limit: int,
     ) -> list[RetrievalResult]:
 
-        if self.knowledge_service is None:
-            return []
-
-        search = getattr(
-            self.knowledge_service,
-            "search",
-            None,
-        )
-
-        if search is None:
-            return []
-
-        raw_results = search(
-            query,
-            limit=limit,
+        passages = (
+            self.knowledge_service.search_passages(
+                query,
+                limit=limit,
+            )
         )
 
         results: list[RetrievalResult] = []
 
-        for item in raw_results:
+        for passage in passages:
 
-            if isinstance(
-                item,
-                RetrievalResult,
-            ):
-                results.append(item)
-                continue
-
-            content = str(
-                getattr(
-                    item,
-                    "content",
-                    "",
-                )
-                if not isinstance(item, dict)
-                else item.get(
-                    "content",
-                    "",
-                )
-            ).strip()
+            content = (
+                passage.content.strip()
+            )
 
             if not content:
                 continue
 
-            identifier = (
-                getattr(
-                    item,
-                    "id",
-                    None,
-                )
-                if not isinstance(item, dict)
-                else item.get("id")
+            score = _lexical_score(
+                query,
+                content,
             )
+
+            if score <= 0:
+                continue
+
+            metadata = dict(
+                getattr(
+                    passage,
+                    "metadata",
+                    {},
+                )
+                or {}
+            )
+
+            metadata.update(
+                {
+                    "document_id": (
+                        passage.document_id
+                    ),
+                    "sequence": (
+                        passage.sequence
+                    ),
+                    "content_hash": (
+                        passage.content_hash
+                    ),
+                }
+            )
+
+            document = (
+                self.knowledge_service.get_document(
+                    passage.document_id
+                )
+            )
+
+            if document is not None:
+
+                metadata.update(
+                    {
+                        "document_title": (
+                            document.title
+                        ),
+                        "source_id": (
+                            document.source_id
+                        ),
+                        "content_type": (
+                            document.content_type
+                        ),
+                        "external_id": (
+                            document.external_id
+                        ),
+                    }
+                )
 
             results.append(
                 RetrievalResult(
                     source=self.name,
-                    identifier=identifier,
+                    identifier=passage.id,
                     content=content,
-                    score=_lexical_score(
-                        query,
-                        content,
-                    ),
+                    score=score,
+                    metadata=metadata,
                 )
             )
 
-        return results[:limit]
+        results.sort(
+            key=lambda result: (
+                result.score,
+                result.identifier
+                if result.identifier is not None
+                else -1,
+            ),
+            reverse=True,
+        )
 
+        return results[:limit]
 
 class RelationshipProvider(RetrievalProvider):
     """
@@ -548,19 +574,8 @@ def _tokenize(
     Normalize text into simple lexical tokens.
     """
 
-    return [
-        token
-        for token in (
-            text.lower()
-            .replace(
-                "\n",
-                " ",
-            )
-            .replace(
-                "\t",
-                " ",
-            )
-            .split()
-        )
-        if token
-    ]
+    return re.findall(
+        r"[\w]+(?:['’-][\w]+)*",
+        text.lower(),
+        flags=re.UNICODE,
+    )

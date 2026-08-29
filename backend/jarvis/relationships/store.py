@@ -5,7 +5,7 @@ Persistent storage for generic Jarvis relationships.
 from datetime import datetime, timezone
 
 from jarvis.relationships.models import Relationship
-from jarvis.storage.database import database
+from jarvis.storage.database import Database, database
 
 
 class RelationshipStore:
@@ -13,14 +13,25 @@ class RelationshipStore:
     Stores and retrieves generic relationships.
 
     This class does not know what a relationship points to.
+
+    Args:
+        database: Optional database instance. When omitted, the application
+            database is used for normal runtime behavior. Tests and isolated
+            consumers can inject a dedicated database.
     """
+
+    def __init__(
+        self,
+        database_instance: Database | None = None,
+    ) -> None:
+        self.database = database_instance or database
 
     def initialize(self) -> None:
         """
         Create the relationship table if it does not exist.
         """
 
-        database.execute(
+        self.database.execute(
             """
             CREATE TABLE IF NOT EXISTS relationships (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +57,7 @@ class RelationshipStore:
             """
         )
 
-        database.execute(
+        self.database.execute(
             """
             CREATE INDEX IF NOT EXISTS
             idx_relationships_source
@@ -54,7 +65,7 @@ class RelationshipStore:
             """
         )
 
-        database.execute(
+        self.database.execute(
             """
             CREATE INDEX IF NOT EXISTS
             idx_relationships_target_type
@@ -84,7 +95,7 @@ class RelationshipStore:
 
         if existing is None:
 
-            database.execute(
+            self.database.execute(
                 """
                 INSERT INTO relationships (
                     source,
@@ -126,7 +137,7 @@ class RelationshipStore:
             return saved
 
         # Update existing record.
-        database.execute(
+        self.database.execute(
             """
             UPDATE relationships
             SET
@@ -167,7 +178,7 @@ class RelationshipStore:
 
         self.initialize()
 
-        row = database.fetch_one(
+        row = self.database.fetch_one(
             """
             SELECT
                 id,
@@ -211,7 +222,7 @@ class RelationshipStore:
 
         if target_type is None:
 
-            rows = database.fetch_all(
+            rows = self.database.fetch_all(
                 """
                 SELECT
                     id,
@@ -233,7 +244,7 @@ class RelationshipStore:
 
         else:
 
-            rows = database.fetch_all(
+            rows = self.database.fetch_all(
                 """
                 SELECT
                     id,
@@ -274,7 +285,7 @@ class RelationshipStore:
 
         if target_type is None:
 
-            rows = database.fetch_all(
+            rows = self.database.fetch_all(
                 """
                 SELECT
                     id,
@@ -294,7 +305,7 @@ class RelationshipStore:
 
         else:
 
-            rows = database.fetch_all(
+            rows = self.database.fetch_all(
                 """
                 SELECT
                     id,
@@ -335,7 +346,7 @@ class RelationshipStore:
             timezone.utc
         ).isoformat()
 
-        database.execute(
+        self.database.execute(
             """
             UPDATE relationships
             SET
@@ -363,7 +374,7 @@ class RelationshipStore:
         Delete a relationship.
         """
 
-        database.execute(
+        self.database.execute(
             """
             DELETE FROM relationships
             WHERE id = ?

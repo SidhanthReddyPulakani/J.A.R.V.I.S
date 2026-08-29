@@ -118,9 +118,7 @@ def main() -> None:
         # Relationship setup
         # ==================================================
 
-        relationships = (
-            RelationshipStore()
-        )
+        relationships = RelationshipStore(db)
 
         relationship = Relationship(
             id=None,
@@ -363,35 +361,6 @@ def main() -> None:
                 "Unknown retrieval source "
                 "was accepted."
             )
-
-        # ==================================================
-        # Empty Knowledge provider
-        #
-        # Knowledge is not yet present in this ZIP.
-        # The provider should therefore safely return
-        # no results rather than breaking Retrieval.
-        # ==================================================
-
-        from jarvis.retrieval.providers import (
-            KnowledgeProvider,
-        )
-
-        knowledge_provider = (
-            KnowledgeProvider()
-        )
-
-        assert (
-            knowledge_provider.search(
-                "anything",
-                limit=10,
-            )
-            == []
-        )
-
-        print(
-            "PASS: Knowledge provider "
-            "is safely extensible."
-        )
 
         print(
             "PASS: Retrieval architecture works."

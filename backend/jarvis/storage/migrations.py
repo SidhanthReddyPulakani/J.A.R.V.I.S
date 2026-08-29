@@ -391,6 +391,180 @@ def migrate_to_v5(
 
     connection.commit()
 
+def migrate_to_v6(
+    connection: sqlite3.Connection,
+) -> None:
+    """
+    Upgrade an existing v5 database to v6.
+
+    v6 introduces the persistent Knowledge / Archive
+    foundation:
+
+        KnowledgeSource
+            |
+            +-- KnowledgeDocument
+                    |
+                    +-- KnowledgePassage
+
+    Existing data is preserved.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            name TEXT NOT NULL,
+
+            source_type TEXT NOT NULL,
+
+            origin TEXT NOT NULL,
+
+            metadata TEXT NOT NULL DEFAULT '{}',
+
+            ingestion_status TEXT NOT NULL DEFAULT 'pending',
+
+            created_at TEXT NOT NULL,
+
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_knowledge_sources_type
+        ON knowledge_sources(source_type)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_knowledge_sources_status
+        ON knowledge_sources(ingestion_status)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            source_id INTEGER NOT NULL,
+
+            title TEXT NOT NULL,
+
+            content_type TEXT NOT NULL
+                DEFAULT 'text/plain',
+
+            external_id TEXT,
+
+            metadata TEXT NOT NULL DEFAULT '{}',
+
+            content_hash TEXT,
+
+            created_at TEXT NOT NULL,
+
+            updated_at TEXT NOT NULL,
+
+            FOREIGN KEY (source_id)
+                REFERENCES knowledge_sources(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_knowledge_documents_source
+        ON knowledge_documents(source_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_knowledge_documents_hash
+        ON knowledge_documents(content_hash)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_knowledge_documents_external_id
+        ON knowledge_documents(
+            source_id,
+            external_id
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_passages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            document_id INTEGER NOT NULL,
+
+            sequence INTEGER NOT NULL,
+
+            content TEXT NOT NULL,
+
+            metadata TEXT NOT NULL DEFAULT '{}',
+
+            content_hash TEXT,
+
+            created_at TEXT NOT NULL,
+
+            updated_at TEXT NOT NULL,
+
+            CHECK (
+                sequence >= 0
+            ),
+
+            FOREIGN KEY (document_id)
+                REFERENCES knowledge_documents(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_knowledge_passages_document
+        ON knowledge_passages(document_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_knowledge_passages_sequence
+        ON knowledge_passages(
+            document_id,
+            sequence
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_knowledge_passages_hash
+        ON knowledge_passages(content_hash)
+        """
+    )
+
+    record_schema_version(
+        connection,
+        6,
+    )
+
+    connection.commit()
+
 def migrate(
     connection: sqlite3.Connection,
 ) -> None:
@@ -443,6 +617,14 @@ def migrate(
         )
 
         current_version = 5
+
+    if current_version == 5:
+
+        migrate_to_v6(
+            connection
+        )
+
+        current_version = 6
 
     if current_version > SCHEMA_VERSION:
 

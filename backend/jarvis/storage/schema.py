@@ -5,7 +5,7 @@ This module contains the SQL required to create the initial
 Jarvis database structure.
 """
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 SCHEMA_SQL = """
@@ -242,6 +242,125 @@ ON memories(subject);
 CREATE INDEX IF NOT EXISTS idx_memories_project
 ON memories(project);
 
+-- --------------------------------------------------
+-- Knowledge Sources
+-- --------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS knowledge_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    name TEXT NOT NULL,
+
+    source_type TEXT NOT NULL,
+
+    origin TEXT NOT NULL,
+
+    metadata TEXT NOT NULL DEFAULT '{}',
+
+    ingestion_status TEXT NOT NULL DEFAULT 'pending',
+
+    created_at TEXT NOT NULL,
+
+    updated_at TEXT NOT NULL
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_type
+ON knowledge_sources(source_type);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_status
+ON knowledge_sources(ingestion_status);
+
+
+-- --------------------------------------------------
+-- Knowledge Documents
+-- --------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    source_id INTEGER NOT NULL,
+
+    title TEXT NOT NULL,
+
+    content_type TEXT NOT NULL DEFAULT 'text/plain',
+
+    external_id TEXT,
+
+    metadata TEXT NOT NULL DEFAULT '{}',
+
+    content_hash TEXT,
+
+    created_at TEXT NOT NULL,
+
+    updated_at TEXT NOT NULL,
+
+    FOREIGN KEY (source_id)
+        REFERENCES knowledge_sources(id)
+        ON DELETE CASCADE
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_source
+ON knowledge_documents(source_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_hash
+ON knowledge_documents(content_hash);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_external_id
+ON knowledge_documents(
+    source_id,
+    external_id
+);
+
+
+-- --------------------------------------------------
+-- Knowledge Passages
+-- --------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS knowledge_passages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    document_id INTEGER NOT NULL,
+
+    sequence INTEGER NOT NULL,
+
+    content TEXT NOT NULL,
+
+    metadata TEXT NOT NULL DEFAULT '{}',
+
+    content_hash TEXT,
+
+    created_at TEXT NOT NULL,
+
+    updated_at TEXT NOT NULL,
+
+    CHECK (
+        sequence >= 0
+    ),
+
+    FOREIGN KEY (document_id)
+        REFERENCES knowledge_documents(id)
+        ON DELETE CASCADE
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_passages_document
+ON knowledge_passages(document_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_passages_sequence
+ON knowledge_passages(
+    document_id,
+    sequence
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_passages_hash
+ON knowledge_passages(content_hash);
 
 -- --------------------------------------------------
 -- Schedule events

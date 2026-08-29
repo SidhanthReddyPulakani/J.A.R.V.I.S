@@ -3,23 +3,61 @@ from ollama import ResponseError
 from jarvis.core.llm import LLMClient
 from jarvis.state.models import AgentState
 from jarvis.core.tools import AVAILABLE_TOOLS
+
 from jarvis.storage.database import database
-from jarvis.storage.repositories.agent_state import AgentStateRepository
-from jarvis.context import (
-    ContextCompiler,
-    ContextRequest,
-    ContextWindowManager,
+
+from jarvis.storage.repositories.agent_state import (
+    AgentStateRepository,
 )
-from jarvis.recall.service import RecallService
 
 from jarvis.storage.repositories.conversations import (
     ConversationRepository,
 )
 
-from jarvis.memory import CoreMemoryService
 from jarvis.storage.repositories.core_memory import (
     CoreMemoryRepository,
 )
+
+from jarvis.storage.repositories.long_term_memory import (
+    LongTermMemoryRepository,
+)
+
+from jarvis.storage.repositories.knowledge import (
+    KnowledgeRepository,
+)
+
+from jarvis.context import (
+    ContextCompiler,
+    ContextRequest,
+    ContextWindowManager,
+)
+
+from jarvis.recall.service import RecallService
+
+from jarvis.memory import (
+    CoreMemoryService,
+)
+
+from jarvis.memory.long_term import (
+    LongTermMemoryService,
+)
+
+from jarvis.knowledge import (
+    KnowledgeService,
+)
+
+from jarvis.relationships.store import (
+    RelationshipStore,
+)
+
+from jarvis.retrieval import (
+    KnowledgeProvider,
+    MemoryProvider,
+    RecallProvider,
+    RelationshipProvider,
+    RetrievalService,
+)
+
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
@@ -37,20 +75,44 @@ class JarvisAgent:
     AGENT_ID = "jarvis"
 
     def __init__(self) -> None:
-        # Ensure the persistent database exists and migrations
-        # have been applied before any repository is used.
+
+        # --------------------------------------------------
+        # Database
+        # --------------------------------------------------
+
         database.initialize()
+
+        # --------------------------------------------------
+        # LLM
+        # --------------------------------------------------
 
         self.llm = LLMClient()
 
         self.enabled = True
 
-        self.state_repository = AgentStateRepository(
-            database
+        # --------------------------------------------------
+        # State
+        # --------------------------------------------------
+
+        self.state_repository = (
+            AgentStateRepository(
+                database
+            )
         )
+
+        # --------------------------------------------------
+        # Recall
+        # --------------------------------------------------
+
         self.recall = RecallService(
-            ConversationRepository(database)
+            ConversationRepository(
+                database
+            )
         )
+
+        # --------------------------------------------------
+        # Agent State
+        # --------------------------------------------------
 
         self.state = (
             self.state_repository.get(
@@ -59,6 +121,7 @@ class JarvisAgent:
         )
 
         if self.state is None:
+
             self.state = AgentState(
                 agent_id=self.AGENT_ID,
             )
@@ -67,30 +130,122 @@ class JarvisAgent:
                 self.state
             )
 
+        # --------------------------------------------------
+        # Conversation
+        # --------------------------------------------------
+
         if self.state.conversation_id is None:
 
             self.state.conversation_id = (
-                self.recall
-                .create_conversation()
+                self.recall.create_conversation()
             )
 
             self.state_repository.save(
                 self.state
             )
-        self.context_compiler = ContextCompiler(
-            system_prompt=SYSTEM_PROMPT
+
+        # --------------------------------------------------
+        # Core Memory
+        # --------------------------------------------------
+
+        self.core_memory = (
+            CoreMemoryService(
+                CoreMemoryRepository(
+                    database
+                ),
+                agent_id=self.AGENT_ID,
+            )
         )
 
-        self.core_memory = CoreMemoryService(
-            CoreMemoryRepository(
-                database
-            ),
-            agent_id=self.AGENT_ID,
-        )
         self.core_memory.ensure_default_blocks()
 
-        self.context_window = ContextWindowManager()
+        # --------------------------------------------------
+        # Long-Term Memory
+        # --------------------------------------------------
 
+        self.memory = (
+            LongTermMemoryService(
+                LongTermMemoryRepository(
+                    database
+                ),
+                agent_id=self.AGENT_ID,
+            )
+        )
+
+        # --------------------------------------------------
+        # Knowledge
+        # --------------------------------------------------
+
+        self.knowledge = (
+            KnowledgeService(
+                KnowledgeRepository(
+                    database
+                )
+            )
+        )
+
+        # --------------------------------------------------
+        # Relationships
+        # --------------------------------------------------
+
+        self.relationships = (
+            RelationshipStore()
+        )
+
+        # --------------------------------------------------
+        # Unified Retrieval
+        #
+        # R2.4G:
+        #
+        # Recall
+        # Memory
+        # Relationship
+        # Knowledge
+        #
+        # all participate in the same RetrievalService.
+        # --------------------------------------------------
+
+        self.retrieval = RetrievalService(
+            providers=[
+                RecallProvider(
+                    recall_service=self.recall,
+                    conversation_id=(
+                        self.state.conversation_id
+                    ),
+                ),
+                MemoryProvider(
+                    memory_service=self.memory,
+                ),
+                RelationshipProvider(
+                    relationship_store=(
+                        self.relationships
+                    ),
+                ),
+                KnowledgeProvider(
+                    knowledge_service=(
+                        self.knowledge
+                    ),
+                ),
+            ]
+        )
+
+        # --------------------------------------------------
+        # Context
+        # --------------------------------------------------
+
+        self.context_compiler = (
+            ContextCompiler(
+                system_prompt=SYSTEM_PROMPT
+            )
+        )
+
+        self.context_window = (
+            ContextWindowManager()
+        )
+
+        # --------------------------------------------------
+        # In-memory conversation representation
+        # --------------------------------------------------
 
         self.messages = []
 
@@ -108,10 +263,19 @@ class JarvisAgent:
                     "content": message["content"],
                 }
             )
+
+    # ======================================================
+    # CONTEXT
+    # ======================================================
+
     def _build_context(self):
         """
         Compile the temporary context for the current
         reasoning step.
+
+        Retrieval is deliberately NOT injected here yet.
+
+        That belongs to R2.4H — Context Integration.
         """
 
         request = ContextRequest(
@@ -122,14 +286,25 @@ class JarvisAgent:
             ),
         )
 
-        compiled = self.context_compiler.compile(
-            request
+        compiled = (
+            self.context_compiler.compile(
+                request
+            )
         )
 
         return self.context_window.prepare(
             compiled
         )
-    def run(self, user_input: str) -> str:
+
+    # ======================================================
+    # RUN
+    # ======================================================
+
+    def run(
+        self,
+        user_input: str,
+    ) -> str:
+
         user_message = {
             "role": "user",
             "content": user_input,
@@ -163,6 +338,7 @@ class JarvisAgent:
         )
 
         if not response.message.tool_calls:
+
             self.recall.add_message(
                 self.state.conversation_id,
                 "assistant",
@@ -179,15 +355,20 @@ class JarvisAgent:
 
         if response.message.tool_calls:
 
-            for call in response.message.tool_calls:
+            for call in (
+                response.message.tool_calls
+            ):
 
                 name = call.function.name
+
                 args = dict(
                     call.function.arguments
                 )
 
-                function = AVAILABLE_TOOLS.get(
-                    name
+                function = (
+                    AVAILABLE_TOOLS.get(
+                        name
+                    )
                 )
 
                 if function is None:
@@ -199,6 +380,7 @@ class JarvisAgent:
                 else:
 
                     try:
+
                         result = str(
                             function(**args)
                         )
@@ -217,6 +399,7 @@ class JarvisAgent:
                         "content": result,
                     }
                 )
+
             # --------------------------------------------------
             # Reasoning step 2
             #
@@ -236,6 +419,7 @@ class JarvisAgent:
             self.messages.append(
                 final.message
             )
+
             self.recall.add_message(
                 self.state.conversation_id,
                 "assistant",
@@ -255,12 +439,28 @@ class JarvisAgent:
             response.message.content
             or "I'm ready."
         )
+
+    # ======================================================
+    # STATE
+    # ======================================================
+
     def _persist_state(self) -> None:
-        """Persist the current Agent State."""
+        """
+        Persist the current Agent State.
+        """
+
         self.state_repository.save(
             self.state
         )
 
+    # ======================================================
+    # ENABLE / DISABLE
+    # ======================================================
+
     def toggle(self) -> bool:
-        self.enabled = not self.enabled
+
+        self.enabled = (
+            not self.enabled
+        )
+
         return self.enabled

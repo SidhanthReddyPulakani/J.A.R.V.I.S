@@ -15,6 +15,11 @@ from jarvis.retrieval.service import (
     RetrievalService,
 )
 
+from jarvis.retrieval.container import (
+    build_retrieval_service,
+)
+
+
 __all__ = [
     "RetrievalRequest",
     "RetrievalResult",
@@ -24,4 +29,5 @@ __all__ = [
     "KnowledgeProvider",
     "RelationshipProvider",
     "RetrievalService",
+    "build_retrieval_service",
 ]
