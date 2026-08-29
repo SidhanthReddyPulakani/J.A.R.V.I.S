@@ -25,7 +25,9 @@ from jarvis.storage.repositories.long_term_memory import (
 from jarvis.storage.repositories.knowledge import (
     KnowledgeRepository,
 )
-
+from jarvis.storage.repositories.diary import (
+    DiaryRepository,
+)
 from jarvis.context import (
     ContextCompiler,
     ContextRequest,
@@ -37,7 +39,9 @@ from jarvis.recall.service import RecallService
 from jarvis.memory import (
     CoreMemoryService,
 )
-
+from jarvis.diary.service import (
+    DiaryService,
+)
 from jarvis.memory.long_term import (
     LongTermMemoryService,
 )
@@ -57,6 +61,8 @@ from jarvis.retrieval import (
     RelationshipProvider,
     RetrievalService,
 )
+
+
 
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
@@ -159,6 +165,7 @@ class JarvisAgent:
 
         self.core_memory.ensure_default_blocks()
 
+
         # --------------------------------------------------
         # Long-Term Memory
         # --------------------------------------------------
@@ -183,7 +190,42 @@ class JarvisAgent:
                 )
             )
         )
+        # --------------------------------------------------
+        # Diary
+        # --------------------------------------------------
 
+        self.diary = (
+            DiaryService(
+                DiaryRepository(
+                    database
+                ),
+                agent_id=self.AGENT_ID,
+            )
+        )
+
+        self.retrieval = RetrievalService(
+            providers=[
+                RecallProvider(
+                    recall_service=self.recall,
+                    conversation_id=(
+                        self.state.conversation_id
+                    ),
+                ),
+                MemoryProvider(
+                    memory_service=self.memory,
+                ),
+                RelationshipProvider(
+                    relationship_store=(
+                        self.relationships
+                    ),
+                ),
+                KnowledgeProvider(
+                    knowledge_service=(
+                        self.knowledge
+                    ),
+                ),
+            ]
+        )
         # --------------------------------------------------
         # Relationships
         # --------------------------------------------------
@@ -267,23 +309,74 @@ class JarvisAgent:
     # ======================================================
     # CONTEXT
     # ======================================================
-
-    def _build_context(self):
+    def _build_context(
+        self,
+        user_input: str = "",
+    ):
         """
         Compile the temporary context for the current
         reasoning step.
 
-        Retrieval is deliberately NOT injected here yet.
+        Context receives:
 
-        That belongs to R2.4H — Context Integration.
+        - current Agent State,
+        - Core Memory,
+        - conversation history,
+        - unified Retrieval results,
+        - relevant Diary events.
+
+        Retrieval remains automatic at the Agent boundary.
+        Agent-controlled retrieval belongs to the later
+        Agent ↔ Information ↔ Capability reasoning loop.
         """
 
+        retrieval_results = []
+
+        if user_input.strip():
+            retrieval_results = (
+                self.retrieval.search(
+                    user_input,
+                    limit=10,
+                )
+            )
+
+        diary_results = []
+
+        if user_input.strip():
+            diary_results = (
+                self.diary.search(
+                    user_input,
+                    conversation_id=(
+                        self.state.conversation_id
+                    ),
+                    limit=10,
+                )
+            )
+
+        else:
+            diary_results = (
+                self.diary.recent(
+                    conversation_id=(
+                        self.state.conversation_id
+                    ),
+                    limit=10,
+                )
+            )
+
         request = ContextRequest(
-            user_input="",
+            user_input=user_input,
             state=self.state,
             conversation=list(
                 self.messages
             ),
+            core_memory=(
+                self.core_memory.list_blocks()
+            ),
+            diary=diary_results,
+            retrieval_results=(
+                retrieval_results
+            ),
+            operation_results=[],
         )
 
         compiled = (
@@ -295,7 +388,6 @@ class JarvisAgent:
         return self.context_window.prepare(
             compiled
         )
-
     # ======================================================
     # RUN
     # ======================================================
@@ -324,7 +416,9 @@ class JarvisAgent:
         # Reasoning step 1
         # --------------------------------------------------
 
-        context = self._build_context()
+        context = self._build_context(
+             user_input=user_input
+        )
 
         response = self.llm.chat(
             messages=context.as_messages(),
