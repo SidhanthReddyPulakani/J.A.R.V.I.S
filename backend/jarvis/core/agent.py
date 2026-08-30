@@ -388,9 +388,21 @@ class JarvisAgent:
             retrieval_results=(
                 retrieval_results
             ),
+            
+            #operation_results=(
+            #    list(
+            #        self.operation_results
+            #        if operation_results is None
+            #        else operation_results
+            #    )
+            #),
             operation_results=(
                 list(
-                    self.operation_results
+                    getattr(
+                        self,
+                        "operation_results",
+                        []
+                    )
                     if operation_results is None
                     else operation_results
                 )
@@ -422,7 +434,6 @@ class JarvisAgent:
     # ======================================================
     # RUN
     # ======================================================
-
     def run(
         self,
         user_input: str,
@@ -437,18 +448,40 @@ class JarvisAgent:
             user_message
         )
 
-        self.recall.add_message(
-            self.state.conversation_id,
-            "user",
-            user_input,
-        )
-
         # --------------------------------------------------
         # Reasoning step 1
+        #
+        # Build Context BEFORE persisting the current
+        # user message to Recall.
+        #
+        # This prevents RecallProvider from retrieving
+        # the exact message that is currently being processed.
+        #
+        # self.messages already contains the current message,
+        # so the LLM still receives it through the conversation
+        # section of Context.
+        #
+        # Recall therefore searches only previously persisted
+        # conversation history and can surface older relevant
+        # information.
         # --------------------------------------------------
 
         context = self._build_context(
             user_input=user_input
+        )
+
+        # --------------------------------------------------
+        # Persist the current user message AFTER retrieval.
+        #
+        # From this point onward, the message is part of
+        # persistent Recall history and will be available
+        # to future turns.
+        # --------------------------------------------------
+
+        self.recall.add_message(
+            self.state.conversation_id,
+            "user",
+            user_input,
         )
 
         response = self.llm.chat(
@@ -564,7 +597,6 @@ class JarvisAgent:
             response.message.content
             or "I'm ready."
         )
-
     # ======================================================
     # STATE
     # ======================================================
