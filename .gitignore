@@ -1,5 +1,13 @@
-.venv
+# Virtual environments
+.venv/
+venv/
+
+# Python cache
 __pycache__/
-data/
+*.py[cod]
+
+# Pytest
 .pytest_cache/
-*.pyc
+
+# Project data
+data/

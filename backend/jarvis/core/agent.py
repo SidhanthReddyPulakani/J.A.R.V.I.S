@@ -531,9 +531,14 @@ class JarvisAgent:
         Retrieval remains a unified boundary for:
         Recall, Long-Term Memory, Knowledge, and Relationships.
 
-        Agent-controlled retrieval as a reasoning action
-        belongs to the later Agent ↔ Information ↔ Capability
-        loop and is intentionally not implemented here.
+        P5.5:
+            Retrieved information is bounded by the
+            configured retrieval token budget before
+            Context compilation.
+
+        P5.6:
+            Context eviction remains temporary. No persistent
+            information is deleted by this method.
         """
 
         # --------------------------------------------------
@@ -573,6 +578,20 @@ class JarvisAgent:
             )
 
         # --------------------------------------------------
+        # P5.5 — Retrieval token budget
+        #
+        # RetrievalService already returns globally ranked
+        # results. ContextWindowManager only decides how much
+        # of that ranked information can enter this context.
+        # --------------------------------------------------
+
+        retrieval_results = (
+            self.context_window.fit_retrieval_budget(
+                retrieval_results
+            )
+        )
+
+        # --------------------------------------------------
         # Assemble the Context request
         # --------------------------------------------------
 
@@ -589,20 +608,12 @@ class JarvisAgent:
             retrieval_results=(
                 retrieval_results
             ),
-            
-            #operation_results=(
-            #    list(
-            #        self.operation_results
-            #        if operation_results is None
-            #        else operation_results
-            #    )
-            #),
             operation_results=(
                 list(
                     getattr(
                         self,
                         "operation_results",
-                        []
+                        [],
                     )
                     if operation_results is None
                     else operation_results
@@ -621,17 +632,16 @@ class JarvisAgent:
         )
 
         # --------------------------------------------------
-        # Apply the current Context Window boundary.
+        # Apply the total Context Window boundary.
         #
-        # R2.11 will expand this layer with actual budget,
-        # pressure, priority, eviction, and summarization
-        # semantics.
+        # P5.4 token-aware eviction occurs here.
+        # P5.6 guarantees that this only changes the
+        # temporary context representation.
         # --------------------------------------------------
 
         return self.context_window.prepare(
             compiled
         )
-
     # ======================================================
     # RUN
     # ======================================================
