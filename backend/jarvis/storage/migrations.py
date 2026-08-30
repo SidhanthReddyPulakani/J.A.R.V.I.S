@@ -564,7 +564,66 @@ def migrate_to_v6(
     )
 
     connection.commit()
+def migrate_to_v7(
+    connection: sqlite3.Connection,
+) -> None:
+    """
+    Upgrade an existing v6 database to v7.
 
+    v7 moves the Relationships schema into the
+    centralized migration system.
+
+    Existing relationship data is preserved.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            source TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target TEXT NOT NULL,
+
+            confidence REAL NOT NULL DEFAULT 0.5,
+            confirmations INTEGER NOT NULL DEFAULT 0,
+            uses INTEGER NOT NULL DEFAULT 0,
+
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_used_at TEXT,
+
+            UNIQUE (
+                source,
+                target_type,
+                target
+            )
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_relationships_source
+        ON relationships(source)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_relationships_target_type
+        ON relationships(target_type)
+        """
+    )
+
+    record_schema_version(
+        connection,
+        7,
+    )
+
+    connection.commit()
 def migrate(
     connection: sqlite3.Connection,
 ) -> None:
@@ -626,12 +685,20 @@ def migrate(
 
         current_version = 6
 
+    if current_version == 6:
+
+        migrate_to_v7(
+            connection
+        )
+
+        current_version = 7
+
     if current_version > SCHEMA_VERSION:
 
         raise RuntimeError(
             "Database schema version "
             f"{current_version} is newer than "
-            f"the supported version "
+            "the supported version "
             f"{SCHEMA_VERSION}."
         )
 

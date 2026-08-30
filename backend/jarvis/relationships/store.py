@@ -14,6 +14,9 @@ class RelationshipStore:
 
     This class does not know what a relationship points to.
 
+    Database schema creation is owned by the centralized
+    migration system.
+
     Args:
         database: Optional database instance. When omitted, the application
             database is used for normal runtime behavior. Tests and isolated
@@ -26,53 +29,6 @@ class RelationshipStore:
     ) -> None:
         self.database = database_instance or database
 
-    def initialize(self) -> None:
-        """
-        Create the relationship table if it does not exist.
-        """
-
-        self.database.execute(
-            """
-            CREATE TABLE IF NOT EXISTS relationships (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                source TEXT NOT NULL,
-                target_type TEXT NOT NULL,
-                target TEXT NOT NULL,
-
-                confidence REAL NOT NULL DEFAULT 0.5,
-                confirmations INTEGER NOT NULL DEFAULT 0,
-                uses INTEGER NOT NULL DEFAULT 0,
-
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                last_used_at TEXT,
-
-                UNIQUE (
-                    source,
-                    target_type,
-                    target
-                )
-            )
-            """
-        )
-
-        self.database.execute(
-            """
-            CREATE INDEX IF NOT EXISTS
-            idx_relationships_source
-            ON relationships(source)
-            """
-        )
-
-        self.database.execute(
-            """
-            CREATE INDEX IF NOT EXISTS
-            idx_relationships_target_type
-            ON relationships(target_type)
-            """
-        )
-
     # ======================================================
     # CREATE / UPDATE
     # ======================================================
@@ -84,8 +40,6 @@ class RelationshipStore:
         """
         Insert or update a relationship.
         """
-
-        self.initialize()
 
         existing = self.find_exact(
             source=relationship.source,
@@ -176,8 +130,6 @@ class RelationshipStore:
         Find one exact relationship.
         """
 
-        self.initialize()
-
         row = self.database.fetch_one(
             """
             SELECT
@@ -217,8 +169,6 @@ class RelationshipStore:
         """
         Find all relationships associated with a source phrase.
         """
-
-        self.initialize()
 
         if target_type is None:
 
@@ -280,8 +230,6 @@ class RelationshipStore:
         """
         Return all stored relationships.
         """
-
-        self.initialize()
 
         if target_type is None:
 

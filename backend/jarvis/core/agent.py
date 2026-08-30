@@ -80,12 +80,8 @@ from jarvis.relationships.store import (
     RelationshipStore,
 )
 
-from jarvis.retrieval import (
-    KnowledgeProvider,
-    MemoryProvider,
-    RecallProvider,
-    RelationshipProvider,
-    RetrievalService,
+from jarvis.retrieval.container import (
+    build_retrieval_service,
 )
 
 
@@ -273,30 +269,13 @@ class JarvisAgent:
         # all participate in one RetrievalService.
         # --------------------------------------------------
 
-        self.retrieval = RetrievalService(
-            providers=[
-                RecallProvider(
-                    recall_service=self.recall,
-                    conversation_id=(
-                        self.state.conversation_id
-                    ),
-                ),
-                MemoryProvider(
-                    memory_service=self.memory,
-                ),
-                RelationshipProvider(
-                    relationship_store=(
-                        self.relationships
-                    ),
-                ),
-                KnowledgeProvider(
-                    knowledge_service=(
-                        self.knowledge
-                    ),
-                ),
-            ]
+        self.retrieval = build_retrieval_service(
+            recall_service=self.recall,
+            memory_service=self.memory,
+            relationship_store=self.relationships,
+            knowledge_service=self.knowledge,
+            conversation_id=self.state.conversation_id,
         )
-
         # --------------------------------------------------
         # Agent Memory Operations
         #

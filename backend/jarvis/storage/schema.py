@@ -5,7 +5,7 @@ This module contains the SQL required to create the initial
 Jarvis database structure.
 """
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 SCHEMA_SQL = """
@@ -363,98 +363,39 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_passages_hash
 ON knowledge_passages(content_hash);
 
 -- --------------------------------------------------
--- Schedule events
+-- Relationships
 -- --------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS schedule_events (
+CREATE TABLE IF NOT EXISTS relationships (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    title TEXT NOT NULL,
-    description TEXT,
-
-    start_time TEXT NOT NULL,
-    end_time TEXT,
-
-    location TEXT,
-
-    recurrence TEXT,
-
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-
-CREATE INDEX IF NOT EXISTS idx_schedule_start_time
-ON schedule_events(start_time);
-
-
--- --------------------------------------------------
--- Reminders
--- --------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS reminders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    title TEXT NOT NULL,
-    description TEXT,
-
-    remind_at TEXT NOT NULL,
-
-    recurrence TEXT,
-
-    completed INTEGER NOT NULL DEFAULT 0,
-
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-
-CREATE INDEX IF NOT EXISTS idx_reminders_remind_at
-ON reminders(remind_at);
-
-
-CREATE INDEX IF NOT EXISTS idx_reminders_completed
-ON reminders(completed);
-
-
--- --------------------------------------------------
--- Templates
--- --------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS templates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    name TEXT NOT NULL UNIQUE,
-
-    description TEXT,
-
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-
--- --------------------------------------------------
--- Applications belonging to templates
--- --------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS template_apps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    template_id INTEGER NOT NULL,
-
-    name TEXT NOT NULL,
-
+    source TEXT NOT NULL,
     target_type TEXT NOT NULL,
     target TEXT NOT NULL,
 
-    created_at TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    confirmations INTEGER NOT NULL DEFAULT 0,
+    uses INTEGER NOT NULL DEFAULT 0,
 
-    FOREIGN KEY (template_id)
-        REFERENCES templates(id)
-        ON DELETE CASCADE
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_used_at TEXT,
+
+    UNIQUE (
+        source,
+        target_type,
+        target
+    )
 );
 
 
-CREATE INDEX IF NOT EXISTS idx_template_apps_template
-ON template_apps(template_id);
+CREATE INDEX IF NOT EXISTS
+idx_relationships_source
+ON relationships(source);
+
+
+CREATE INDEX IF NOT EXISTS
+idx_relationships_target_type
+ON relationships(target_type);
+
 """
