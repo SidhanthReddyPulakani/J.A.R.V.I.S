@@ -1,13 +1,16 @@
 from ollama import ResponseError
 
 from jarvis.core.llm import LLMClient
-from jarvis.state.models import AgentState
 from jarvis.core.tools import AVAILABLE_TOOLS
 
 from jarvis.storage.database import database
 
 from jarvis.storage.repositories.agent_state import (
     AgentStateRepository,
+)
+
+from jarvis.state import (
+    AgentState,
 )
 
 from jarvis.storage.repositories.conversations import (
@@ -25,9 +28,11 @@ from jarvis.storage.repositories.long_term_memory import (
 from jarvis.storage.repositories.knowledge import (
     KnowledgeRepository,
 )
+
 from jarvis.storage.repositories.diary import (
     DiaryRepository,
 )
+
 from jarvis.context import (
     ContextCompiler,
     ContextRequest,
@@ -36,12 +41,13 @@ from jarvis.context import (
 
 from jarvis.recall.service import RecallService
 
-from jarvis.memory import (
+from jarvis.memory.service import (
     CoreMemoryService,
 )
 from jarvis.diary.service import (
     DiaryService,
 )
+
 from jarvis.memory.long_term import (
     LongTermMemoryService,
 )
@@ -61,8 +67,6 @@ from jarvis.retrieval import (
     RelationshipProvider,
     RetrievalService,
 )
-
-
 
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
@@ -165,7 +169,6 @@ class JarvisAgent:
 
         self.core_memory.ensure_default_blocks()
 
-
         # --------------------------------------------------
         # Long-Term Memory
         # --------------------------------------------------
@@ -190,6 +193,7 @@ class JarvisAgent:
                 )
             )
         )
+
         # --------------------------------------------------
         # Diary
         # --------------------------------------------------
@@ -203,31 +207,12 @@ class JarvisAgent:
             )
         )
 
-        self.retrieval = RetrievalService(
-            providers=[
-                RecallProvider(
-                    recall_service=self.recall,
-                    conversation_id=(
-                        self.state.conversation_id
-                    ),
-                ),
-                MemoryProvider(
-                    memory_service=self.memory,
-                ),
-                RelationshipProvider(
-                    relationship_store=(
-                        self.relationships
-                    ),
-                ),
-                KnowledgeProvider(
-                    knowledge_service=(
-                        self.knowledge
-                    ),
-                ),
-            ]
-        )
         # --------------------------------------------------
         # Relationships
+        # --------------------------------------------------
+        #
+        # Must be created before any RetrievalProvider
+        # references it.
         # --------------------------------------------------
 
         self.relationships = (
@@ -244,7 +229,7 @@ class JarvisAgent:
         # Relationship
         # Knowledge
         #
-        # all participate in the same RetrievalService.
+        # all participate in one RetrievalService.
         # --------------------------------------------------
 
         self.retrieval = RetrievalService(
@@ -287,7 +272,12 @@ class JarvisAgent:
 
         # --------------------------------------------------
         # In-memory conversation representation
+        #
+        # Recall remains the persistence source.
+        # self.messages is the Agent's current runtime
+        # representation used by the existing reasoning path.
         # --------------------------------------------------
+        self.operation_results = []
 
         self.messages = []
 
@@ -309,30 +299,48 @@ class JarvisAgent:
     # ======================================================
     # CONTEXT
     # ======================================================
+
     def _build_context(
         self,
         user_input: str = "",
+        operation_results=None,
     ):
         """
-        Compile the temporary context for the current
-        reasoning step.
+        Build the complete temporary Context for one
+        Agent reasoning step.
 
-        Context receives:
+        This is the single authoritative context-assembly
+        operation.
 
-        - current Agent State,
-        - Core Memory,
-        - conversation history,
-        - unified Retrieval results,
-        - relevant Diary events.
+        Information is collected through Agent-owned
+        services/providers and passed into ContextRequest.
 
-        Retrieval remains automatic at the Agent boundary.
-        Agent-controlled retrieval belongs to the later
-        Agent ↔ Information ↔ Capability reasoning loop.
+        Context itself never accesses persistence.
+
+        Assembly order:
+
+        1. Current input
+        2. Current Agent State
+        3. Core Memory
+        4. Current conversation
+        5. Relevant unified Retrieval results
+        6. Relevant Diary events
+        7. Operation results
+
+        Retrieval remains a unified boundary for:
+        Recall, Long-Term Memory, Knowledge, and Relationships.
+
+        Agent-controlled retrieval as a reasoning action
+        belongs to the later Agent ↔ Information ↔ Capability
+        loop and is intentionally not implemented here.
         """
 
-        retrieval_results = []
+        # --------------------------------------------------
+        # Current query-dependent information
+        # --------------------------------------------------
 
         if user_input.strip():
+
             retrieval_results = (
                 self.retrieval.search(
                     user_input,
@@ -340,9 +348,6 @@ class JarvisAgent:
                 )
             )
 
-        diary_results = []
-
-        if user_input.strip():
             diary_results = (
                 self.diary.search(
                     user_input,
@@ -354,6 +359,9 @@ class JarvisAgent:
             )
 
         else:
+
+            retrieval_results = []
+
             diary_results = (
                 self.diary.recent(
                     conversation_id=(
@@ -362,6 +370,10 @@ class JarvisAgent:
                     limit=10,
                 )
             )
+
+        # --------------------------------------------------
+        # Assemble the Context request
+        # --------------------------------------------------
 
         request = ContextRequest(
             user_input=user_input,
@@ -376,8 +388,18 @@ class JarvisAgent:
             retrieval_results=(
                 retrieval_results
             ),
-            operation_results=[],
+            operation_results=(
+                list(
+                    self.operation_results
+                    if operation_results is None
+                    else operation_results
+                )
+            ),
         )
+
+        # --------------------------------------------------
+        # Compile
+        # --------------------------------------------------
 
         compiled = (
             self.context_compiler.compile(
@@ -385,9 +407,18 @@ class JarvisAgent:
             )
         )
 
+        # --------------------------------------------------
+        # Apply the current Context Window boundary.
+        #
+        # R2.11 will expand this layer with actual budget,
+        # pressure, priority, eviction, and summarization
+        # semantics.
+        # --------------------------------------------------
+
         return self.context_window.prepare(
             compiled
         )
+
     # ======================================================
     # RUN
     # ======================================================
@@ -417,7 +448,7 @@ class JarvisAgent:
         # --------------------------------------------------
 
         context = self._build_context(
-             user_input=user_input
+            user_input=user_input
         )
 
         response = self.llm.chat(
@@ -497,8 +528,8 @@ class JarvisAgent:
             # --------------------------------------------------
             # Reasoning step 2
             #
-            # Build a NEW context because the conversation
-            # changed.
+            # The conversation changed, therefore a fresh
+            # Context is assembled.
             # --------------------------------------------------
 
             context = self._build_context()
