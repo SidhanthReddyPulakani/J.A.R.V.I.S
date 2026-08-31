@@ -87,7 +87,14 @@ from jarvis.core.agent_turn import (
     AgentToolCall,
     AgentTurnResult,
 )
-
+from jarvis.core.agent_trace import (
+    AgentExecutionTrace,
+    AgentTraceStep,
+    AgentTerminationReason,
+)
+from jarvis.core.agent_observation import (
+    AgentOperationObservation,
+)
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
@@ -567,6 +574,47 @@ class JarvisAgent:
                 tool_calls
             ),
         )
+    
+    def _record_agent_turn(
+        self,
+        turn: AgentTurnResult,
+    ) -> None:
+        """
+        Record one normalized Agent turn in the runtime
+        conversation representation.
+
+        The representation remains provider-independent while
+        preserving the model's requested tool calls so that a
+        subsequent Context build can reconstruct the complete
+        model/tool interaction.
+
+        This method does not execute operations.
+        """
+
+        assistant_message = dict(
+            turn.assistant_message
+        )
+
+        if turn.tool_calls:
+
+            assistant_message["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": dict(
+                            call.arguments
+                        ),
+                    },
+                }
+                for call in turn.tool_calls
+            ]
+
+        self.messages.append(
+            assistant_message
+        )
+
     def _build_context(
         self,
         user_input: str = "",
@@ -708,6 +756,33 @@ class JarvisAgent:
         return self.context_window.prepare(
             compiled
         )
+        # ======================================================
+    # STATE
+    # ======================================================
+
+    def _persist_state(self) -> None:
+        """
+        Persist the current Agent State.
+        """
+
+        self.state_repository.save(
+            self.state
+        )
+
+    # ======================================================
+    # ENABLE / DISABLE
+    # ======================================================
+
+    def toggle(self) -> bool:
+
+        self.enabled = (
+            not self.enabled
+        )
+
+        return self.enabled
+    # ======================================================
+    # RUN
+    # ======================================================
     # ======================================================
     # RUN
     # ======================================================
@@ -715,6 +790,18 @@ class JarvisAgent:
         self,
         user_input: str,
     ) -> str:
+
+        # --------------------------------------------------
+        # Execution trace
+        #
+        # A new trace is created for every Agent run.
+        # The trace contains observable execution events only.
+        # It does not contain hidden chain-of-thought.
+        # --------------------------------------------------
+
+        self.last_execution_trace = (
+            AgentExecutionTrace()
+        )
 
         user_message = {
             "role": "user",
@@ -729,8 +816,8 @@ class JarvisAgent:
         # Initial context
         #
         # Retrieval happens before persisting the current
-        # user message so Recall cannot retrieve the
-        # message currently being processed.
+        # user message so Recall cannot retrieve the message
+        # currently being processed.
         # --------------------------------------------------
 
         context = self._build_context(
@@ -757,225 +844,276 @@ class JarvisAgent:
         )
 
         # --------------------------------------------------
-        # Reset ephemeral operation results for this turn.
+        # Operation results are ephemeral to this Agent run.
         # --------------------------------------------------
 
         self.operation_results = []
 
         # --------------------------------------------------
-        # Reasoning step 1
+        # Bounded Agent Execution Loop
         # --------------------------------------------------
 
-        response = self.llm.chat(
-            messages=context.as_messages(),
-            tools=self._get_llm_tools(),
-        )
+        final_text = None
 
-        self.messages.append(
-            response.message
-        )
-
-        if not response.message.tool_calls:
-
-            self.recall.add_message(
-                self.state.conversation_id,
-                "assistant",
-                response.message.content or "",
-            )
-
-            # --------------------------------------------------
-            # Diary
-            # --------------------------------------------------
-
-            self.diary.record(
-                event_type="conversation_turn",
-                description=(
-                    "Completed conversation turn. "
-                    f"User: {user_input} "
-                    f"Jarvis: "
-                    f"{response.message.content or ''}"
-                ),
-                conversation_id=(
-                    self.state.conversation_id
-                ),
-                source="agent",
-            )
-
-            self._persist_state()
-
-            return (
-                response.message.content
-                or "I'm ready."
-            )
-
-        # --------------------------------------------------
-        # Tool / Agent Memory Operation execution
-        # --------------------------------------------------
-
-        for call in (
-            response.message.tool_calls
+        for step in range(
+            self.MAX_REASONING_STEPS
         ):
 
-            name = call.function.name
+            # --------------------------------------------------
+            # Rebuild context after the first reasoning step.
+            #
+            # The initial context was deliberately assembled
+            # before current-turn memory formation.
+            # --------------------------------------------------
 
-            args = dict(
-                call.function.arguments
+            if step > 0:
+
+                context = self._build_context()
+
+            # --------------------------------------------------
+            # Execute exactly one model turn.
+            # --------------------------------------------------
+
+            turn = self._run_agent_turn(
+                context
             )
 
             # --------------------------------------------------
-            # Agent Memory Operation
+            # Preserve the assistant turn, including tool calls.
             # --------------------------------------------------
 
-            if name in {
-                "memory_read_core",
-                "memory_list_core",
-                "memory_replace_core",
-                "memory_append_core",
-                "memory_create",
-                "memory_get",
-                "memory_list",
-                "memory_delete",
-                "recall_search",
-                "knowledge_search",
-                "memory_search",
-            }:
-
-                operation_result = (
-                    self._execute_memory_operation(
-                        name=name,
-                        args=args,
-                    )
-                )
-
-                self.operation_results.append(
-                    operation_result
-                )
-
-                # Keep a normal tool-role message so the
-                # existing LLM conversation protocol remains
-                # intact.
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_name": name,
-                        "content": (
-                            str(
-                                operation_result.data
-                            )
-                            if operation_result.status
-                            == OperationStatus.SUCCESS
-                            else (
-                                operation_result.error_message
-                                or "Operation failed."
-                            )
-                        ),
-                    }
-                )
-
-                continue
-
-            # --------------------------------------------------
-            # Existing application tool
-            # --------------------------------------------------
-
-            function = (
-                AVAILABLE_TOOLS.get(
-                    name
-                )
+            self._record_agent_turn(
+                turn
             )
 
-            if function is None:
+            # --------------------------------------------------
+            # Create a trace entry for this reasoning step.
+            # --------------------------------------------------
 
-                result = (
-                    f"Unknown tool: {name}"
+            trace_step = AgentTraceStep(
+                step=step + 1
+            )
+
+            self.last_execution_trace.add_step(
+                trace_step
+            )
+
+            # --------------------------------------------------
+            # Normal termination:
+            #
+            # The model requested no further operations.
+            # --------------------------------------------------
+
+            if turn.completed:
+
+                final_text = (
+                    turn.assistant_message.get(
+                        "content",
+                        ""
+                    )
+                    or "I'm ready."
                 )
 
-                operation_result = (
-                    OperationResult.failure_result(
-                        operation=name,
-                        error_code=(
-                            OperationErrorCode.NOT_FOUND
-                        ),
-                        error_message=result,
-                    )
+                self.last_execution_trace.terminate(
+                    AgentTerminationReason.MODEL_COMPLETED
                 )
 
-            else:
+                break
 
-                try:
+            # --------------------------------------------------
+            # Execute every operation requested by this
+            # model turn.
+            # --------------------------------------------------
 
-                    result = function(
-                        **args
-                    )
+            for call in turn.tool_calls:
+
+                name = call.name
+
+                args = dict(
+                    call.arguments
+                )
+
+                # --------------------------------------------------
+                # Agent Memory Operation
+                # --------------------------------------------------
+
+                if name in {
+                    "memory_read_core",
+                    "memory_list_core",
+                    "memory_replace_core",
+                    "memory_append_core",
+                    "memory_create",
+                    "memory_get",
+                    "memory_list",
+                    "memory_delete",
+                    "recall_search",
+                    "knowledge_search",
+                    "memory_search",
+                }:
 
                     operation_result = (
-                        OperationResult.success_result(
+                        self._execute_memory_operation(
+                            name=name,
+                            args=args,
+                        )
+                    )
+
+                    self.operation_results.append(
+                        operation_result
+                    )
+
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": name,
+                            "content": (
+                                str(
+                                    operation_result.data
+                                )
+                                if operation_result.status
+                                == OperationStatus.SUCCESS
+                                else (
+                                    operation_result.error_message
+                                    or "Operation failed."
+                                )
+                            ),
+                        }
+                    )
+
+                    # --------------------------------------------------
+                    # Record observable operation outcome.
+                    # --------------------------------------------------
+
+                    trace_step.observations.append(
+                        AgentOperationObservation(
+                            tool_call_id=call.id,
                             operation=name,
-                            data=result,
+                            result=operation_result,
                         )
                     )
 
-                    result = str(
-                        result
-                    )
+                    continue
 
-                except Exception as exc:
+                # --------------------------------------------------
+                # Existing application tool
+                # --------------------------------------------------
 
-                    error_code = (
-                        classify_operation_exception(
-                            exc
-                        )
+                function = (
+                    AVAILABLE_TOOLS.get(
+                        name
                     )
+                )
+
+                if function is None:
 
                     result = (
-                        "Tool execution failed: "
-                        f"{exc}"
+                        f"Unknown tool: {name}"
                     )
 
                     operation_result = (
                         OperationResult.failure_result(
                             operation=name,
-                            error_code=error_code,
-                            error_message=str(
-                                exc
+                            error_code=(
+                                OperationErrorCode.NOT_FOUND
                             ),
+                            error_message=result,
                         )
                     )
 
-            self.operation_results.append(
-                operation_result
-            )
+                else:
 
-            self.messages.append(
-                {
-                    "role": "tool",
-                    "tool_name": name,
-                    "content": result,
-                }
-            )
+                    try:
+
+                        result = function(
+                            **args
+                        )
+
+                        operation_result = (
+                            OperationResult.success_result(
+                                operation=name,
+                                data=result,
+                            )
+                        )
+
+                        result = str(
+                            result
+                        )
+
+                    except Exception as exc:
+
+                        error_code = (
+                            classify_operation_exception(
+                                exc
+                            )
+                        )
+
+                        result = (
+                            "Tool execution failed: "
+                            f"{exc}"
+                        )
+
+                        operation_result = (
+                            OperationResult.failure_result(
+                                operation=name,
+                                error_code=error_code,
+                                error_message=str(
+                                    exc
+                                ),
+                            )
+                        )
+
+                self.operation_results.append(
+                    operation_result
+                )
+
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_name": name,
+                        "content": result,
+                    }
+                )
+
+                # --------------------------------------------------
+                # Record observable operation outcome.
+                # --------------------------------------------------
+
+                trace_step.observations.append(
+                    AgentOperationObservation(
+                        tool_call_id=call.id,
+                        operation=name,
+                        result=operation_result,
+                    )
+                )
 
         # --------------------------------------------------
-        # Reasoning step 2
+        # Safety termination
         #
-        # The newly created OperationResults are now part
-        # of the Agent-owned Context.
+        # Reaching this point means every permitted reasoning
+        # step requested further operations and none produced
+        # normal model completion.
         # --------------------------------------------------
 
-        context = self._build_context()
+        if final_text is None:
 
-        final = self.llm.chat(
-            messages=context.as_messages(),
-            tools=self._get_llm_tools(),
-        )
+            final_text = (
+                "I wasn't able to finish reasoning "
+                "about that within the allowed number "
+                "of steps."
+            )
 
-        self.messages.append(
-            final.message
-        )
+            self.last_execution_trace.terminate(
+                AgentTerminationReason.MAX_STEPS_REACHED
+            )
+
+        # --------------------------------------------------
+        # Persist final conversational response.
+        # --------------------------------------------------
 
         self.recall.add_message(
             self.state.conversation_id,
             "assistant",
-            final.message.content or "",
+            final_text,
         )
 
         # --------------------------------------------------
@@ -987,8 +1125,7 @@ class JarvisAgent:
             description=(
                 "Completed conversation turn. "
                 f"User: {user_input} "
-                f"Jarvis: "
-                f"{final.message.content or ''}"
+                f"Jarvis: {final_text}"
             ),
             conversation_id=(
                 self.state.conversation_id
@@ -998,32 +1135,7 @@ class JarvisAgent:
 
         self._persist_state()
 
-        return (
-            final.message.content
-            or "Done."
-        )
+        return final_text
 
-    # ======================================================
-    # STATE
-    # ======================================================
 
-    def _persist_state(self) -> None:
-        """
-        Persist the current Agent State.
-        """
-
-        self.state_repository.save(
-            self.state
-        )
-
-    # ======================================================
-    # ENABLE / DISABLE
-    # ======================================================
-
-    def toggle(self) -> bool:
-
-        self.enabled = (
-            not self.enabled
-        )
-
-        return self.enabled
+# ======================================================
