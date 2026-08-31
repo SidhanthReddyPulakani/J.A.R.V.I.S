@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPainter, QPen, QColor
 from PySide6.QtWidgets import QWidget
 
-import backend.frontend.theme as theme
+import frontend.theme as theme
 
 
 class ResizeGrip(QWidget):

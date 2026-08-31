@@ -7,7 +7,7 @@ from PySide6.QtCore import (
     QTimer,
 )
 
-from backend.frontend.backend_bridge import BackendBridge
+from frontend.backend_bridge import BackendBridge
 
 
 # ------------------------------------------------------

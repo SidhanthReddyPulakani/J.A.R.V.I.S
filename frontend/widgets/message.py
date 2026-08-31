@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
-import backend.frontend.theme as theme
+import frontend.theme as theme
 
 
 class MessageBubble(QFrame):
