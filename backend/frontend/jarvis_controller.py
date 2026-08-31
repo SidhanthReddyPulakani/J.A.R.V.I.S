@@ -7,7 +7,7 @@ from PySide6.QtCore import (
     QTimer,
 )
 
-from backend_bridge import BackendBridge
+from backend.frontend.backend_bridge import BackendBridge
 
 
 # ------------------------------------------------------
@@ -16,12 +16,17 @@ from backend_bridge import BackendBridge
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-BACKEND_DIR = PROJECT_ROOT / "backend"
+# NOTE: PROJECT_ROOT (parents[1] of this file, i.e. .../backend) *is*
+# already the directory that contains the "jarvis" package directly
+# (backend/jarvis). It must NOT be joined with another "backend" —
+# that pointed sys.path at a non-existent backend/backend folder,
+# which is why "jarvis" could never be found.
+BACKEND_DIR = PROJECT_ROOT
 
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from jarvis.system.ollama import OllamaController
+from jarvis.core.llm import LLMClient
 
 
 class JarvisController(QObject):
@@ -43,12 +48,6 @@ class JarvisController(QObject):
         # --------------------------------------------------
 
         self.backend = BackendBridge(self)
-
-        # --------------------------------------------------
-        # Ollama
-        # --------------------------------------------------
-
-        self.ollama = OllamaController()
 
         # --------------------------------------------------
         # State
@@ -105,15 +104,26 @@ class JarvisController(QObject):
         )
 
         # --------------------------------------------------
-        # Start Ollama
+        # Ollama is a standalone service (see jarvis.core.llm
+        # / jarvis.core.config): the backend connects to it
+        # over HTTP, it does not spawn or manage it. The
+        # frontend's job here is only to check it's reachable
+        # before starting the backend subprocess — not to
+        # start Ollama itself.
         # --------------------------------------------------
 
-        if not self.ollama.start():
+        if not self._ollama_reachable():
 
             self.starting = False
 
             print(
-                "[Jarvis failed: Ollama could not start]"
+                "[Jarvis failed: Ollama is not reachable]"
+            )
+
+            self._broadcast_error(
+                "Couldn't reach Ollama. Make sure the "
+                "Ollama app/service is running, then try "
+                "again."
             )
 
             self.state_changed.emit(False)
@@ -121,13 +131,36 @@ class JarvisController(QObject):
             return
 
         # --------------------------------------------------
-        # Give Ollama time to initialize.
+        # Small delay purely so the UI has a moment to show
+        # a "connecting" state before the backend subprocess
+        # spins up; not waiting on anything to start.
         # --------------------------------------------------
 
         QTimer.singleShot(
-            1000,
+            150,
             self._start_backend
         )
+
+    # ======================================================
+    # OLLAMA REACHABILITY CHECK
+    # ======================================================
+
+    def _ollama_reachable(self) -> bool:
+
+        try:
+
+            client = LLMClient()
+
+            return client.check_connection()
+
+        except Exception as exc:
+
+            print(
+                f"[JarvisController] "
+                f"Ollama check failed: {exc}"
+            )
+
+            return False
 
     # ======================================================
     # START BACKEND
@@ -136,8 +169,8 @@ class JarvisController(QObject):
     def _start_backend(self):
 
         # --------------------------------------------------
-        # A shutdown may have been requested while Ollama
-        # was starting.
+        # A shutdown may have been requested while the
+        # reachability check / delay was in flight.
         # --------------------------------------------------
 
         if self.stopping:
@@ -201,15 +234,20 @@ class JarvisController(QObject):
         self.last_query = ""
 
         # --------------------------------------------------
-        # Hide main interface.
+        # Main interface stays on the desktop.
+        #
+        # It is a persistent widget, not a session window —
+        # disabling Jarvis should not make it disappear. It's
+        # told about the offline state below (state_changed)
+        # so it can reflect "Jarvis is offline" instead.
         # --------------------------------------------------
 
-        if self.window is not None:
-
-            self.window.hide()
-
         # --------------------------------------------------
-        # Hide overlay.
+        # Hide the overlay.
+        #
+        # The overlay IS a transient, hotkey-summoned popup,
+        # so dismissing it when the backend goes down is
+        # correct.
         # --------------------------------------------------
 
         if self.overlay is not None:
@@ -218,6 +256,9 @@ class JarvisController(QObject):
 
         # --------------------------------------------------
         # Stop backend.
+        #
+        # Ollama itself is left running — it's a standalone
+        # service the frontend never owned the lifecycle of.
         # --------------------------------------------------
 
         try:
@@ -232,24 +273,6 @@ class JarvisController(QObject):
             )
 
         # --------------------------------------------------
-        # Stop Ollama + unload models + clean stale
-        # llama-server processes.
-        # --------------------------------------------------
-
-        try:
-
-            ollama_clean = self.ollama.stop()
-
-        except Exception as exc:
-
-            ollama_clean = False
-
-            print(
-                f"[JarvisController] "
-                f"Ollama shutdown error: {exc}"
-            )
-
-        # --------------------------------------------------
         # Tell frontend about final state.
         # --------------------------------------------------
 
@@ -257,18 +280,9 @@ class JarvisController(QObject):
 
         self.stopping = False
 
-        if ollama_clean:
-
-            print(
-                "[Jarvis DISABLED]"
-            )
-
-        else:
-
-            print(
-                "[Jarvis DISABLED - "
-                "Ollama cleanup reported a problem]"
-            )
+        print(
+            "[Jarvis DISABLED]"
+        )
 
     # ======================================================
     # MASTER TOGGLE
@@ -294,11 +308,11 @@ class JarvisController(QObject):
     def toggle_interface(self):
 
         # --------------------------------------------------
-        # Interface cannot appear while Jarvis is disabled.
+        # The main widget is a persistent desktop fixture and
+        # can be shown/hidden on demand regardless of whether
+        # the backend is currently enabled — it just shows an
+        # offline state when it is (see on_backend_state_changed).
         # --------------------------------------------------
-
-        if not self.enabled:
-            return
 
         if self.window.isVisible():
 

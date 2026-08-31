@@ -23,20 +23,22 @@ class BackendBridge(QObject):
         # --------------------------------------------------
         # Project paths
         #
-        # Expected structure:
+        # Actual structure (frontend lives *inside* backend):
         #
-        # Jarvis/
-        # ├── backend/
-        # │   ├── .venv/
-        # │   └── main.py
-        # │
+        # backend/
+        # ├── .venv/
+        # ├── main.py
+        # ├── jarvis/
         # └── frontend/
         #     └── backend_bridge.py
         # --------------------------------------------------
 
         project_root = Path(__file__).resolve().parents[1]
 
-        self.backend_dir = project_root / "backend"
+        # project_root already IS the "backend" folder (it contains
+        # main.py, jarvis/, and .venv/ directly) — it must not be
+        # joined with another "backend" segment.
+        self.backend_dir = project_root
 
         self.python_executable = (
             project_root
