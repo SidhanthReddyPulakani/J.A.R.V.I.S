@@ -81,14 +81,253 @@ Once these four are done, every information subsystem (State, Recall, Core Memor
 
 ---
 
-## P7 — Turn the reasoning loop into a real multi-step loop ⬜ Planned
+## P7 — Build a Real Agent Execution Loop ⬜ Planned
 
-**What**: `agent.run()` today is a fixed two-step shape — one LLM call, optionally one round of tool calls, one more LLM call, done. The architecture calls for an actual loop: reason → act → observe → reason again → ... → terminate, an arbitrary number of times, not a hardcoded two.
-**Build**:
-- A loop (not two sequential blocks) that keeps calling the LLM and executing tool/memory-operation calls until the LLM returns a response with no further tool calls, or a safety cap on iterations is hit.
-- A clear termination signal — the model needs an unambiguous way to say "I'm done," and the loop needs a hard iteration ceiling so a confused model can't spin forever.
-- State/Diary/Memory updates happen as part of the loop's natural rhythm (they already do, per turn — this just needs to keep working once a turn can contain N reasoning steps instead of 2).
-**Why here, not later**: this is Agent-side infrastructure that doesn't need the Capability Controller to exist — you can build and test it entirely against your current tools (`AVAILABLE_TOOLS` + memory operations). Building it now means P9–P16 (the Capability Controller work) plugs into a loop that already handles arbitrary length, instead of you discovering the two-step limitation later while also debugging a brand-new Controller.
+**What**: `agent.run()` currently has a fixed two-step interaction shape: one LLM call, optionally one round of tool/memory operations, then a final LLM call. P7 replaces this with a genuine **Agent Execution Loop** that can continue for an arbitrary number of model/tool turns within explicit safety limits.
+
+The runtime should follow:
+
+**reason → act → observe → reason again → … → terminate**
+
+The loop must be an Agent-side orchestration layer, independent of the future Capability Controller.
+
+---
+
+### Build
+
+#### 1. Agent Turn
+
+Extract the existing model interaction into a clear, reusable **Agent Turn**.
+
+A turn should:
+
+* Assemble the current context.
+* Call the LLM.
+* Process the model response.
+* Detect whether the model produced tool/memory-operation calls.
+* Distinguish between a response requiring further action and a final response.
+
+The Agent Turn should not expose or attempt to reproduce the model's private reasoning.
+
+---
+
+#### 2. Iterative Execution Loop
+
+Replace the current hardcoded two-call structure with an actual execution loop:
+
+**Model → tool calls → execution → observations → Model → …**
+
+Each iteration should:
+
+1. Build the current context.
+2. Call the LLM.
+3. Record the assistant response.
+4. If there are no tool calls, terminate with the model's final response.
+5. If tool/memory operations exist, execute them.
+6. Record their structured results.
+7. Feed those results back as observations.
+8. Continue to the next model turn.
+
+The existing tool and memory-operation dispatch mechanisms remain authoritative; P7 must not create a parallel execution system.
+
+---
+
+#### 3. Structured Tool Observations
+
+Tool and memory-operation results must become explicit observations available to the next model turn.
+
+The Agent should preserve the distinction between:
+
+* successful operations,
+* failed operations,
+* recoverable failures,
+* non-recoverable failures,
+* malformed requests,
+* and other existing `OperationResult` outcomes.
+
+A failed operation should normally be observable by the model so that it can decide whether to retry, change strategy, or terminate.
+
+---
+
+#### 4. Explicit Termination
+
+The loop terminates when the model produces **no further tool/memory-operation calls**.
+
+This represents the model's observable completion signal:
+
+**No requested operation → final response**
+
+The runtime must also enforce a hard execution ceiling using `MAX_REASONING_STEPS`.
+
+`MAX_REASONING_STEPS` is a **safety boundary**, not the normal completion mechanism.
+
+A model that reaches the ceiling without producing a final response must be terminated safely and deterministically.
+
+---
+
+#### 5. Context Rebuild Between Turns
+
+Every reasoning iteration must use the existing Context Assembly pipeline.
+
+The loop must not construct one static context at the beginning and reuse it indefinitely.
+
+Each iteration should be able to observe changes produced by previous operations through:
+
+* Agent State
+* Core Memory
+* Recall
+* Long-Term Memory
+* Diary
+* Knowledge
+* Relationships
+* Runtime conversation
+* Tool/memory-operation results
+
+This preserves the purpose of P5's context-management system when execution extends beyond two model calls.
+
+---
+
+#### 6. State, Diary, and Memory Continuity
+
+Existing State, Diary, Memory, and persistence behavior must continue to operate naturally across every iteration.
+
+P7 is an orchestration change, not a replacement of those systems.
+
+Operations performed during step N must be capable of influencing the context available at step N+1.
+
+---
+
+#### 7. Execution Trace
+
+Introduce an explicit runtime-level execution trace for the Agent loop.
+
+At minimum, the trace should make it possible to identify:
+
+* execution step,
+* model turn,
+* requested operations,
+* operation results,
+* continuation,
+* termination reason.
+
+This trace is for **observable execution/debugging**, not for exposing private model chain-of-thought.
+
+The trace should eventually provide the foundation for visualizing how JARVIS is operating.
+
+---
+
+#### 8. Safety and Termination Controls
+
+P7 must prevent runaway execution.
+
+The initial hard boundary is:
+
+`MAX_REASONING_STEPS = 10`
+
+The architecture should keep this limit configurable so additional execution controls can be introduced later without redesigning the loop.
+
+The loop must never depend on the model voluntarily stopping in order to remain safe.
+
+---
+
+### Tests
+
+P7 must prove that the implementation is genuinely multi-step rather than merely replacing one hardcoded second call with a loop-shaped construct.
+
+Tests should cover:
+
+1. **Single-turn completion**
+
+   * LLM returns no tool calls.
+   * Agent terminates after one model turn.
+
+2. **Two-step execution**
+
+   * Model requests an operation.
+   * Operation succeeds.
+   * Model receives the result and produces the final response.
+
+3. **Three-or-more-step execution**
+
+   * Model requests an operation.
+   * Receives the result.
+   * Requests another operation.
+   * Receives the result.
+   * Eventually produces a final response.
+   * Verify that all model turns actually occurred.
+
+4. **Multiple operations in one turn**
+
+   * Preserve the existing batch operation behavior.
+
+5. **Tool failure recovery**
+
+   * Operation fails.
+   * Failure becomes an observation.
+   * Model can respond with another operation or terminate.
+
+6. **Maximum-step termination**
+
+   * Model continually requests operations.
+   * Agent stops exactly at `MAX_REASONING_STEPS`.
+   * No infinite execution occurs.
+
+7. **Context refresh**
+
+   * An operation changes State/Memory/Diary/etc.
+   * The subsequent model turn receives the updated context.
+
+8. **Runtime persistence**
+
+   * Multi-step execution does not lose or destructively mutate runtime conversation history.
+
+9. **Execution trace**
+
+   * Each model turn and operation result is represented in the trace.
+   * The final trace identifies the correct termination reason.
+
+---
+
+### Why here, not later
+
+P7 is Agent-side execution infrastructure and does not require the Capability Controller.
+
+Building the execution loop now allows the future Capability Controller work in P9–P16 to plug into an Agent runtime that already supports arbitrary-length tool interaction.
+
+The architectural dependency becomes:
+
+**P7 Agent Execution Loop → P9–P16 Capability Controller**
+
+rather than discovering and redesigning the two-step limitation after the Controller has already been introduced.
+
+---
+
+### P7 completion criteria
+
+P7 is complete when:
+
+* `agent.run()` no longer contains a hardcoded two-call reasoning structure.
+* The Agent can perform an arbitrary number of model/tool turns within the configured safety ceiling.
+* The model can terminate by producing no further operations.
+* Tool and memory-operation results are observable by subsequent model turns.
+* Context is rebuilt between turns.
+* State/Diary/Memory behavior remains intact across multiple iterations.
+* Tool failures can participate in the reasoning cycle.
+* The maximum-step safety boundary is enforced.
+* Execution is represented by an observable runtime trace.
+* The active test suite proves genuine 3+ step execution and runaway-loop termination.
+
+
+P7.1 — Define Agent Turn contract
+P7.2 — Extract current single-turn model interaction
+P7.3 — Formalize tool-result observation
+P7.4 — Implement bounded execution loop
+P7.5 — Rebuild context between turns
+P7.6 — Add recovery from tool failures
+P7.7 — Add execution trace
+P7.8 — Multi-step integration tests
+P7.9 — Infinite-loop / termination tests
+P7.10 — Real JARVIS visual execution trace
 
 ## P8 — Formalize the operation/result protocol between Agent and future Capabilities ⬜ Planned
 
