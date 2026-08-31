@@ -83,7 +83,10 @@ from jarvis.relationships.store import (
 from jarvis.retrieval.container import (
     build_retrieval_service,
 )
-
+from jarvis.core.agent_turn import (
+    AgentToolCall,
+    AgentTurnResult,
+)
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
@@ -501,6 +504,69 @@ class JarvisAgent:
                     ),
                 )
             )
+        
+    def _run_agent_turn(
+        self,
+        context,
+    ) -> AgentTurnResult:
+        """
+        Execute exactly one LLM interaction and normalize
+        the provider response into the Agent Turn contract.
+
+        This method does not execute tools, mutate memory,
+        persist messages, rebuild context, or control the
+        reasoning loop.
+
+        Those responsibilities remain with the Agent runtime.
+
+        The method therefore establishes the boundary:
+
+            provider response
+                ↓
+            AgentTurnResult
+        """
+
+        response = self.llm.chat(
+            messages=context.as_messages(),
+            tools=self._get_llm_tools(),
+        )
+
+        message = response.message
+
+        assistant_message = {
+            "role": "assistant",
+            "content": (
+                message.content
+                or ""
+            ),
+        }
+
+        tool_calls = []
+
+        for call in (
+            message.tool_calls
+            or []
+        ):
+            tool_calls.append(
+                AgentToolCall(
+                    id=getattr(
+                        call,
+                        "id",
+                        None,
+                    ),
+                    name=call.function.name,
+                    arguments=dict(
+                        call.function.arguments
+                    ),
+                )
+            )
+
+        return AgentTurnResult(
+            assistant_message=assistant_message,
+            tool_calls=tuple(
+                tool_calls
+            ),
+        )
     def _build_context(
         self,
         user_input: str = "",
