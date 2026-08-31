@@ -253,7 +253,7 @@ class JarvisAgent:
         # --------------------------------------------------
 
         self.relationships = (
-            RelationshipStore()
+            RelationshipStore(database)
         )
 
         # --------------------------------------------------
