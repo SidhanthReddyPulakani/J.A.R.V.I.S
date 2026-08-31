@@ -99,7 +99,7 @@ Your priorities:
 class JarvisAgent:
 
     AGENT_ID = "jarvis"
-
+    MAX_REASONING_STEPS = 10
     def __init__(self) -> None:
 
         # --------------------------------------------------

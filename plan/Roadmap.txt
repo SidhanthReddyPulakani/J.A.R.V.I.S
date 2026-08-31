@@ -1,0 +1,910 @@
+Status meanings:
+
+* ✅ **Complete** — implemented and verified
+* 🟡 **Partial** — foundation exists, but the actual objective isn't complete
+* 🔵 **In progress** — this is what we're actively working on
+* 🔴 **Not started**
+* ⚠️ **Defined but needs verification/integration**
+
+And per your rule: **a main Phase only becomes ✅ when every required subphase is complete.**
+
+---
+for /d /r . %d in (__pycache__) do @if exist "%d" rmdir /s /q "%d"   
+
+# 🧠 J.A.R.V.I.S. — MASTER DEVELOPMENT CHECKLIST
+
+## PHASE 0 — 🏗️ ARCHITECTURE
+
+**Goal:** Complete architectural specification. 
+
+### 0.1 — Core Architecture
+
+* ✅ 0.1A — Agent Core definition
+* ✅ 0.1B — Context architecture
+* ✅ 0.1C — State definition
+* ✅ 0.1D — Memory architecture
+* ✅ 0.1E — Diary definition
+* ✅ 0.1F — Storage boundaries
+* ✅ 0.1G — Frontend ↔ Backend boundary
+* ✅ 0.1H — Reliability principles
+
+### 0.2 — Capability Architecture
+
+* ✅ 0.2A — Capability concept
+* ✅ 0.2B — Operation concept
+* ✅ 0.2C — Capability Controller concept
+* ✅ 0.2D — Capability composition rules
+* ✅ 0.2E — Reliability / governance model
+
+### 0.3 — Information Architecture
+
+* ✅ 0.3A — State
+* ✅ 0.3B — Recall
+* ✅ 0.3C — Core Memory
+* ✅ 0.3D — Long-Term Memory
+* ✅ 0.3E — Diary
+* ✅ 0.3F — Knowledge / Archive
+* ✅ 0.3G — Relationships
+* ✅ 0.3H — Retrieval
+* ✅ 0.3I — Context
+
+### **PHASE 0 → ✅ COMPLETE**
+
+The architecture explicitly establishes the separation between these information domains and the Letta-inspired concepts without copying Letta's implementation. 
+
+---
+
+# PHASE 1 — 🧠 AGENT CORE
+
+**Goal:** A persistent Jarvis runtime independent of individual capabilities. 
+
+### 1.1 — LLM Interface
+
+* ✅ 1.1A — LLM abstraction
+* ✅ 1.1B — Ollama/Qwen implementation
+* ⚠️ 1.1C — Fully model-agnostic runtime boundary
+
+### 1.2 — Agent State
+
+* ✅ 1.2A — `AgentState` model
+* ✅ 1.2B — State repository
+* ✅ 1.2C — State service/integration
+* ✅ 1.2D — Persistence
+* ✅ 1.2E — State reload
+* ✅ 1.2F — Context representation
+
+### 1.3 — Recall / Conversation
+
+* ✅ 1.3A — Conversation model/storage
+* ✅ 1.3B — Message persistence
+* ✅ 1.3C — Recall service
+* ✅ 1.3D — Conversation restoration
+* ✅ 1.3E — Recall search
+
+### 1.4 — Core Memory
+
+* ✅ 1.4A — MemoryBlock model
+* ✅ 1.4B — Repository
+* ✅ 1.4C — Service
+* ✅ 1.4D — Persistence
+* ✅ 1.4E — Capacity
+* ✅ 1.4F — Editing
+* ✅ 1.4G — Context injection
+
+### 1.5 — Diary
+
+* ✅ 1.5A — Event model
+* ✅ 1.5B — Repository
+* ✅ 1.5C — Service
+* ✅ 1.5D — Persistence
+* ✅ 1.5E — Recording
+* ✅ 1.5F — Querying
+
+### 1.6 — Basic Context
+
+* ✅ 1.6A — Context models
+* ✅ 1.6B — Context compiler
+* ✅ 1.6C — Core Memory → Context
+* ✅ 1.6D — State → Context
+* ⚠️ 1.6E — Full dynamic context lifecycle
+
+### 1.7 — Agent Reasoning Loop
+
+* 🟡 1.7A — Basic user → Agent → LLM loop
+* 🟡 1.7B — Structured reasoning result
+* 🔴 1.7C — Explicit multi-step agent loop
+* 🔴 1.7D — Repeated reasoning/continuation
+* 🔴 1.7E — State/Diary/Memory updates as part of the loop
+* 🔴 1.7F — Proper termination/iteration control
+
+### 1.8 — Agent Protocol
+
+* 🟡 1.8A — Tool-call handling exists
+* 🔴 1.8B — Structured operation protocol
+* 🔴 1.8C — Internal reasoning event model
+* 🔴 1.8D — Capability request/result protocol
+
+### **PHASE 1 → 🟡 PARTIAL**
+
+The foundations are very strong, but the **actual Letta-inspired agent runtime loop is not finished**. The current `JarvisAgent` still contains the older direct-tool execution pathway.
+
+This matches the original plan's distinction between the persistent Agent runtime and the later Capability Controller.
+
+---
+
+# PHASE 2 — ⚙️ CAPABILITY CORE
+
+**Goal:** Universal governed capability ecosystem. 
+
+### 2.1 — Capability Contract
+
+* 🔴 2.1A — Capability interface
+* 🔴 2.1B — Capability metadata
+* 🔴 2.1C — Capability identity/version
+
+### 2.2 — Operation Contract
+
+* 🔴 2.2A — Operation interface
+* 🔴 2.2B — `capability.operation` addressing
+* 🔴 2.2C — Operation schema
+
+### 2.3 — Operation Request
+
+* 🔴 2.3A — Request model
+* 🔴 2.3B — Validation
+* 🔴 2.3C — Invocation metadata
+
+### 2.4 — Operation Result
+
+* 🔴 2.4A — `OperationResult`
+* 🔴 2.4B — Success/failure semantics
+* 🔴 2.4C — Error normalization
+
+### 2.5 — Operation State
+
+* 🔴 2.5A — `OperationState`
+* 🔴 2.5B — Lifecycle
+* 🔴 2.5C — Cancellation/termination
+
+### 2.6 — Capability Registry
+
+* 🔴 2.6A — Registration
+* 🔴 2.6B — Lookup
+* 🔴 2.6C — Discovery
+* 🔴 2.6D — Description
+
+### 2.7 — Capability Controller
+
+* 🔴 2.7A — Central execution gateway
+* 🔴 2.7B — Validation
+* 🔴 2.7C — Permissions/governance
+* 🔴 2.7D — Logging
+* 🔴 2.7E — Error handling
+* 🔴 2.7F — Dependency management
+
+### **PHASE 2 → 🔴 NOT STARTED**
+
+The architecture is defined, but there is currently **no `capabilities/` / Controller system in the backend ZIP**.
+
+---
+
+# PHASE 3 — 🖥️ APPS MIGRATION
+
+**Goal:** Convert existing Apps functionality into the first proper Capability. 
+
+Existing Apps internals:
+
+* discovery
+* resolver
+* launcher
+* verification
+* manager
+
+### 3.1 — Apps Capability
+
+* 🔴 3.1A — Apps capability wrapper
+* 🔴 3.1B — Capability registration
+
+### 3.2 — Apps Operations
+
+* 🔴 3.2A — `apps.find`
+* 🔴 3.2B — `apps.resolve`
+* 🔴 3.2C — `apps.launch`
+* 🔴 3.2D — Future `apps.close`
+
+### 3.3 — Controller Integration
+
+* 🔴 3.3A — Apps → Controller
+* 🔴 3.3B — OperationResult
+* 🔴 3.3C — Validation
+* 🔴 3.3D — Verification
+
+### 3.4 — Legacy Path Removal
+
+* 🔴 3.4A — Remove direct Agent → tool execution
+* 🔴 3.4B — Remove duplicated routing
+
+### **PHASE 3 → 🔴 NOT STARTED**
+
+The old `features/apps/` implementation exists and works as an application subsystem, but it is **not yet a proper Capability**.
+
+---
+
+# PHASE 4 — 🔄 AGENT ↔ CAPABILITY INTEGRATION
+
+**Goal:** Agent can reason → act → observe → reason again. 
+
+### 4.1 — Agent → Controller
+
+* 🔴 4.1A — Agent emits operation request
+* 🔴 4.1B — Controller receives request
+* 🔴 4.1C — Validation
+
+### 4.2 — Controller → Capability
+
+* 🔴 4.2A — Operation resolution
+* 🔴 4.2B — Execution
+* 🔴 4.2C — Verification
+
+### 4.3 — Result → Agent
+
+* 🔴 4.3A — OperationResult
+* 🔴 4.3B — Result → Context
+* 🔴 4.3C — Agent observes result
+
+### 4.4 — Multi-Step Execution
+
+* 🔴 4.4A — Reason → act
+* 🔴 4.4B — Observe
+* 🔴 4.4C — Reason again
+* 🔴 4.4D — Multiple capabilities
+* 🔴 4.4E — Termination
+
+### **PHASE 4 → 🔴 NOT STARTED**
+
+This is the major transformation from the current command-oriented Agent into the intended agentic runtime.
+
+---
+
+# PHASE 5 — 🧠 STATE & KNOWLEDGE
+
+**Goal:** Genuine long-term continuity. 
+
+This is where we've done **a huge amount of work**.
+
+---
+
+## 5.1 — Core Memory
+
+* ✅ MemoryBlock
+* ✅ Repository
+* ✅ Service
+* ✅ Persistence
+* ✅ Editing
+* ✅ Capacity
+* ✅ Context integration
+
+**5.1 → ✅**
+
+---
+
+## 5.2 — Long-Term Memory
+
+* ✅ Model
+* ✅ Repository
+* ✅ CRUD
+* ✅ Agent scoping
+* ✅ Active/superseded lifecycle
+* ✅ Supersession
+* ✅ Consolidation
+* ✅ Persistence
+
+**5.2 → ✅**
+
+---
+
+## 5.3 — Diary
+
+* ✅ Event model
+* ✅ Repository
+* ✅ Service
+* ✅ Recording
+* ✅ Querying
+* ✅ Persistence
+
+**5.3 → ✅**
+
+---
+
+## 5.4 — Knowledge / Archive
+
+Our actual implementation expanded beyond the minimal original list.
+
+### 5.4A — Models
+
+* ✅ Source
+* ✅ Document
+* ✅ Passage
+
+### 5.4B — Persistence
+
+* ✅ Schema
+* ✅ Migration
+* ✅ Repository
+* ✅ CRUD
+
+### 5.4C — Service
+
+* ✅ Knowledge Service
+
+### 5.4D — Ingestion
+
+* ✅ Source → Document → Passage
+* ✅ Normalization
+* ✅ Hashing
+* ✅ Deterministic chunking
+* ✅ Ingestion status
+
+### 5.4E — Retrieval
+
+* ✅ Knowledge Provider
+* ✅ Knowledge search
+* ✅ Unified Retrieval participation
+
+**5.4 → ✅**
+
+---
+
+# 5.5 — Relationships
+
+* ✅ Relationship model
+* ✅ Persistent store
+* ✅ Resolver
+* ✅ Confidence
+* ✅ Confirmation tracking
+* ✅ Usage tracking
+* ✅ Retrieval Provider
+
+**5.5 → ✅**
+
+Relationships are correctly treated as an **association layer**, not another memory tier. 
+
+---
+
+# 5.6 — Retrieval
+
+### 5.6A — Retrieval Contract
+
+* ✅ `RetrievalRequest`
+* ✅ `RetrievalResult`
+* ✅ Provider interface
+
+### 5.6B — Providers
+
+* ✅ Recall
+* ✅ Long-Term Memory
+* ✅ Relationships
+* ✅ Knowledge
+
+### 5.6C — Unified Retrieval
+
+* ✅ Provider registration
+* ✅ Source filtering
+* ✅ Multi-source retrieval
+* ✅ Global ranking
+* ✅ Stable ranking
+* ✅ Unknown-source validation
+
+### 5.6D — Retrieval → Context
+
+* ✅ Retrieval results can be compiled into Context
+* ⚠️ Actual Agent runtime integration still pending
+
+**5.6 → ✅ as Retrieval infrastructure**
+
+---
+
+# 5.7 — Memory Formation
+
+* ✅ Memory Candidate
+* ✅ Candidate validation
+* ✅ Extraction
+* ✅ Evaluation
+* ✅ Confidence thresholds
+* ✅ Importance thresholds
+* ✅ Explicit retention override
+* ✅ Duplicate detection
+* ✅ Conflict detection
+* ✅ Supersession
+* ✅ Persistence
+
+**5.7 → ✅**
+
+---
+
+# 5.8 — Memory Consolidation
+
+* ✅ Consolidation detection
+* ✅ Duplicate consolidation
+* ✅ Conflict/supersession handling
+* ✅ Atomic persistence
+* ✅ Historical preservation
+* ✅ Tests
+
+**5.8 → ✅**
+
+This is the point you were remembering correctly earlier: **Formation + Consolidation are already done.** 
+
+---
+
+# 5.9 — Agentic Memory Operations
+
+This is **NOT complete yet**.
+
+### 5.9A — Core Memory Operations
+
+* 🟡 Core Memory service operations exist
+* 🔴 Agent can invoke them autonomously
+
+### 5.9B — Long-Term Memory Operations
+
+* 🟡 Service operations exist
+* 🔴 Agent-controlled invocation
+
+### 5.9C — Recall Operations
+
+* 🟡 Search exists
+* 🔴 Agent-controlled retrieval
+
+### 5.9D — Knowledge Operations
+
+* 🟡 Search exists
+* 🔴 Agent-controlled retrieval
+
+### 5.9E — Repeated Retrieval
+
+* 🔴 Retrieve
+* 🔴 Reason
+* 🔴 Retrieve again
+* 🔴 Continue
+
+This corresponds directly to the Letta/MemGPT idea that the agent itself decides **when** and **what** to retrieve.
+
+**5.9 → 🔴**
+
+---
+
+# 5.10 — Context Integration
+
+### 5.10A — Context Architecture
+
+* ✅ Context models
+* ✅ Context Compiler
+* ✅ Context Window Manager abstraction
+
+### 5.10B — Information Slots
+
+* ✅ Core Memory
+* ✅ Retrieval
+* ✅ State
+* ⚠️ Recall
+* ⚠️ LTM
+* ⚠️ Diary
+* ⚠️ Knowledge
+* ⚠️ Relationships
+* ⚠️ Capability information
+* ⚠️ Operation results
+
+### 5.10C — Actual Agent Integration
+
+* 🔵 **CURRENT WORK**
+* 🔴 Retrieval automatically gathered for each reasoning cycle
+* 🔴 Core Memory automatically supplied
+* 🔴 Relevant retrieved information supplied to Context
+* 🔴 Context rebuilt after state/retrieval changes
+* 🔴 Agent → Context → LLM complete loop
+
+This is the distinction we've been talking about.
+
+**The Context compiler already knows how to consume retrieval. The Agent doesn't yet actually feed it there during normal operation.**
+
+So **R2.9/R2.4H-style Context Integration is the thing we are actually approaching now.**
+
+---
+
+# 5.11 — Context Window Management
+
+* 🟡 Basic `ContextWindowManager`
+* 🔴 Token estimation
+* 🔴 Token budget
+* 🔴 Pressure detection
+* 🔴 Selective eviction
+* 🔴 Summarization
+* 🔴 Recursive summarization
+* 🔴 Preservation in Recall
+* 🔴 Context rebuilding
+
+This comes from the MemGPT concept of virtual context and memory pressure.
+
+---
+
+# 5.12 — R2 Integration Tests
+
+* 🟡 Many subsystem tests exist
+* 🟡 Retrieval integration tests exist
+* 🔴 Complete information lifecycle test
+* 🔴 Full Agent → Retrieval → Context → LLM test
+* 🔴 Memory formation → persistence → retrieval → context test
+* 🔴 Restart/reload end-to-end test
+
+### **PHASE 5 → 🟡 PARTIAL**
+
+This is the most advanced phase currently.
+
+---
+
+# 📌 R2 DETAILED CHECKPOINT
+
+This is the version I think you should actually keep beside you while we work:
+
+```text
+R2.1  Core Memory
+      ✅ COMPLETE
+
+R2.2  Long-Term Memory
+      ✅ COMPLETE
+
+R2.3  Diary
+      ✅ COMPLETE
+
+R2.4  Knowledge / Archive
+      ✅ COMPLETE
+
+R2.5  Relationships
+      ✅ COMPLETE
+
+R2.6  Retrieval
+      ✅ COMPLETE
+
+R2.7  Memory Formation
+      ✅ COMPLETE
+
+R2.8  Memory Consolidation
+      ✅ COMPLETE
+
+R2.9  Agentic Memory Operations
+      🔴 NOT COMPLETE
+
+R2.10 Context Integration
+      🔵 CURRENT
+
+R2.11 Context Window Management
+      🔴 NOT COMPLETE
+
+R2.12 Final Integration / E2E
+      🔴 NOT COMPLETE
+```
+
+**This is a refinement of the original R2.1–R2.10 plan**, because our actual implementation split some responsibilities more clearly as we built them. The original source defines R2.8 as Agentic Memory Operations, R2.9 as Context Integration, and R2.10 as Integration Tests.
+
+I would **keep the original numbering in your master document** and use these extra implementation checkpoints only underneath them, so we don't create another numbering problem.
+
+---
+
+# PHASE 6 — 🧰 CORE CAPABILITY ECOSYSTEM
+
+**Goal:** Make Jarvis practically useful. 
+
+### 6.1 — Files
+
+* 🔴 Read
+* 🔴 Write
+* 🔴 Search
+* 🔴 Move
+* 🔴 Copy
+* 🔴 Delete
+* 🔴 Metadata
+
+### 6.2 — Folders
+
+* 🔴 Create
+* 🔴 Browse
+* 🔴 Search
+* 🔴 Organize
+
+### 6.3 — Scheduler
+
+* 🔴 Create
+* 🔴 Cancel
+* 🔴 List
+* 🔴 Trigger
+
+### 6.4 — Projects
+
+* 🔴 Project model
+* 🔴 Project state
+* 🔴 Project context
+* 🔴 Project operations
+
+### 6.5 — Templates
+
+* 🔴 Template storage
+* 🔴 Template retrieval
+* 🔴 Template application
+
+### 6.6 — Git
+
+* 🔴 Status
+* 🔴 Diff
+* 🔴 Commit
+* 🔴 Branch
+* 🔴 Log
+* 🔴 Safe execution
+
+### 6.7 — System
+
+* 🔴 System information
+* 🔴 Process management
+* 🔴 Environment operations
+
+### **PHASE 6 → 🔴 NOT STARTED**
+
+---
+
+# PHASE 7 — 🔗 CAPABILITY COMPOSITION
+
+**Goal:** Capabilities can work together through the Controller. 
+
+### 7.1
+
+* 🔴 Capability → Controller → Capability
+
+### 7.2
+
+* 🔴 Dependency resolution
+
+### 7.3
+
+* 🔴 Multi-capability workflows
+
+### 7.4
+
+* 🔴 Shared operation state
+
+### 7.5
+
+* 🔴 Failure recovery
+
+### 7.6
+
+* 🔴 Goal-level orchestration
+
+### **PHASE 7 → 🔴 NOT STARTED**
+
+---
+
+# PHASE 8 — 🧬 PERSONALIZATION & LEARNING
+
+**Goal:** Jarvis increasingly understands how you work. 
+
+### 8.1 — Preference Learning
+
+* 🔴
+
+### 8.2 — Workflow Learning
+
+* 🔴
+
+### 8.3 — Relevance Improvement
+
+* 🔴
+
+### 8.4 — Historical Understanding
+
+* 🔴
+
+### 8.5 — Project Continuity
+
+* 🔴
+
+### 8.6 — Advanced Memory Consolidation
+
+* 🔴
+
+### **PHASE 8 → 🔴 NOT STARTED**
+
+---
+
+# PHASE 9 — ⚡ PROACTIVITY
+
+**Goal:** Jarvis can act proactively.
+
+### 9.1
+
+* 🔴 Scheduled reasoning
+
+### 9.2
+
+* 🔴 Monitoring
+
+### 9.3
+
+* 🔴 Reminders
+
+### 9.4
+
+* 🔴 Background processing
+
+### 9.5
+
+* 🔴 Preparation workflows
+
+### 9.6
+
+* 🔴 Controlled autonomous actions
+
+### **PHASE 9 → 🔴 NOT STARTED**
+
+---
+
+# PHASE 10 — 🤖 ADVANCED AGENT ARCHITECTURE
+
+### 10.1
+
+* 🔴 Skills
+
+### 10.2
+
+* 🔴 Specialized agents
+
+### 10.3
+
+* 🔴 Sub-agents
+
+### 10.4
+
+* 🔴 Planning
+
+### 10.5
+
+* 🔴 Delegation
+
+### 10.6
+
+* 🔴 Background reasoning
+
+### **PHASE 10 → 🔴 NOT STARTED**
+
+These are explicitly future possibilities rather than things we should prematurely implement. 
+
+---
+
+# PHASE 11 — 🧬 SELF-IMPROVEMENT
+
+### 11.1
+
+* 🔴 Learned workflows
+
+### 11.2
+
+* 🔴 Skill generation/update
+
+### 11.3
+
+* 🔴 Capability generation
+
+### 11.4
+
+* 🔴 Self-evaluation
+
+### 11.5
+
+* 🔴 Controlled self-improvement
+
+### **PHASE 11 → 🔴 NOT STARTED**
+
+This is intentionally aspirational and comes only after the foundation is extremely reliable. 
+
+---
+
+# 🗺️ WHERE WE ACTUALLY ARE RIGHT NOW
+
+If I compress the entire project to one view:
+
+```text
+PHASE 0  Architecture
+         ✅ COMPLETE
+             │
+             ▼
+PHASE 1  Agent Core
+         🟡 FOUNDATION COMPLETE
+         🔴 FINAL AGENT LOOP REMAINS
+             │
+             ▼
+PHASE 2  Capability Core
+         🔴
+             │
+             ▼
+PHASE 3  Apps Migration
+         🔴
+             │
+             ▼
+PHASE 4  Agent ↔ Capability
+         🔴
+             │
+             ▼
+PHASE 5  State & Knowledge
+         🟡
+             │
+             ├── Core Memory       ✅
+             ├── LTM               ✅
+             ├── Diary             ✅
+             ├── Knowledge         ✅
+             ├── Relationships     ✅
+             ├── Retrieval         ✅
+             ├── Formation         ✅
+             ├── Consolidation     ✅
+             ├── Agentic Ops       🔴
+             ├── Context           🔵 CURRENT
+             ├── Window Mgmt       🔴
+             └── E2E               🔴
+             │
+             ▼
+PHASE 6  Capability Ecosystem
+         🔴
+             │
+             ▼
+PHASE 7  Composition
+         🔴
+             │
+             ▼
+PHASE 8  Learning
+         🔴
+             │
+             ▼
+PHASE 9  Proactivity
+         🔴
+             │
+             ▼
+PHASE 10 Advanced Architecture
+         🔴
+             │
+             ▼
+PHASE 11 Self-Improvement
+         🔴
+```
+
+## 🎯 And therefore: our immediate next move
+
+**We should NOT jump to G.5/G.6 from the old R2.4 numbering.**
+
+The actual state of the project says:
+
+> **We have finished the Knowledge/Retrieval infrastructure. We are now at the point where the information systems need to become part of the actual Agent reasoning lifecycle.**
+
+That means our immediate work is:
+
+```text
+CURRENT
+R2 State/Knowledge foundation
+        ↓
+🔵 Context Integration
+        ↓
+Agent retrieves relevant information
+        ↓
+Context Compiler receives it
+        ↓
+LLM reasons with it
+        ↓
+Context rebuilt when state changes
+        ↓
+Agentic memory/retrieval operations
+        ↓
+End-to-end lifecycle
+```
+
+This is directly aligned with the intended final lifecycle:
+
+**perceive → understand → retrieve → reason → act → observe → record → learn/retain → continue.** 
+
+And the Letta/MemGPT material reinforces the same architectural direction: persistent state outside the active context, selective retrieval, self-managed memory, context compilation, and repeated reasoning steps.

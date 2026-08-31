@@ -1,5 +1,7 @@
 # J.A.R.V.I.S. — The Roadmap (P0 → P31)
 
+for /d /r . %d in (__pycache__) do @if exist "%d" rmdir /s /q "%d"   
+
 **This file replaces everything you've been maintaining**: `Roadmap.txt`, `JARVIS_long_term_vision_and_build_plan.txt`, `architecture.txt`, `Jarvis_project_direction.txt`, `R2_10A___Context_Contract_Audit.txt`, `current_path.txt`, `current_state.txt`, and my own earlier `Jarvis_Master_Roadmap.md`. The Phase 0–11 / R2.1–R2.12 numbering is retired. From here on there is **one number line, P0 through P31**, in the exact order you should do the work. Nothing from the old docs is lost — every phase, sub-phase, and future capability listed in your vision doc is folded in below, just renumbered and sequenced by actual dependency order rather than by which document it originally lived in.
 
 **Status tags**: ✅ Done (verified) &nbsp;·&nbsp; 🔵 Do next &nbsp;·&nbsp; ⬜ Planned, not started &nbsp;·&nbsp; 🌫️ Aspirational (no fixed shape yet, intentionally vague until it's next)
@@ -49,7 +51,7 @@ Every entry has the same shape: **what it is, why it's positioned here, what "do
 
 ---
 
-## P5 — Context Window Management 🔵 Do next
+## P5 — Context Window Management ✅ Done
 
 **What**: `jarvis/context/window.py` currently only truncates by message count. Three concrete pieces, build in this order:
 1. **Token estimation** — a crude `len(text) // 4` approximation is enough to start; no real tokenizer needed yet.
@@ -61,9 +63,9 @@ P5.1 — Token accounting ✅ Done
 P5.2 — Budget ✅ Done
 P5.3 — Pressure ✅ Done
 P5.4 — Token-aware eviction ✅ Done
-P5.5 — Retrieval budget
-P5.6 — Safety invariant
-Agent Integration
+P5.5 — Retrieval budget ✅ Done
+P5.6 — Safety invariant ✅ Done
+Agent Integration ✅ Done
 
 ---
 
@@ -75,7 +77,7 @@ Agent Integration
 3. `_execute_memory_operation` receives malformed argument types (e.g., `label=123`) — confirm it fails as a clean `OperationResult`, never an unhandled exception that crashes `run()`.
 **Why here**: (1) is the one genuine unknown left in the agent loop; (2) and (3) are cheap to lock in now that you know they work.
 
-**→ P3–P6 close out what used to be "Phase 5 / R2" entirely.** Once these four are done, every information subsystem (State, Recall, Core Memory, Long-Term Memory, Diary, Knowledge, Relationships, Retrieval, Context) is not just built and wired but **proven**, by committed tests, to survive real use and real failure. This is the actual finish line for "the foundation," by your own definition of the term.
+Once these four are done, every information subsystem (State, Recall, Core Memory, Long-Term Memory, Diary, Knowledge, Relationships, Retrieval, Context) is not just built and wired but **proven**, by committed tests, to survive real use and real failure. This is the actual finish line for "the foundation," by your own definition of the term.
 
 ---
 
