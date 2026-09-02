@@ -9,18 +9,11 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
-import frontend.theme as theme
-from frontend.widgets.overlay_search_bar import (
-    OverlaySearchBar,
-)
+import backend.frontend.theme as theme
+from backend.frontend.widgets.search_bar import SearchBar
+from backend.frontend.widgets.conversation import ConversationView
+from backend.frontend.widgets.resize_grip import ResizeGrip
 
-from frontend.widgets.overlay_conversation import (
-    OverlayConversationView,
-)
-
-from frontend.widgets.overlay_resize_grip import (
-    OverlayResizeGrip,
-)
 
 class OverlayWindow(QWidget):
     """
@@ -126,7 +119,7 @@ class OverlayWindow(QWidget):
         # Conversation
         # --------------------------------------------------
 
-        self.conversation = OverlayConversationView(bubble_max_width=360)
+        self.conversation = ConversationView(bubble_max_width=360)
         self.conversation.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Expanding,
@@ -138,7 +131,7 @@ class OverlayWindow(QWidget):
         # Search bar
         # --------------------------------------------------
 
-        self.search_bar = OverlaySearchBar()
+        self.search_bar = SearchBar()
         self.search_bar.submitted.connect(self._submit)
 
         root.addWidget(self.search_bar)
@@ -148,7 +141,7 @@ class OverlayWindow(QWidget):
         # same widget MainWindow uses, so behavior/feel match.
         # --------------------------------------------------
 
-        self.resize_grip = OverlayResizeGrip(self, parent=self)
+        self.resize_grip = ResizeGrip(self, parent=self)
 
         self.move_to_bottom_right()
 
@@ -213,7 +206,6 @@ class OverlayWindow(QWidget):
 
         self.conversation.set_thinking(False)
         self.conversation.add_exchange(query, f"Backend error: {error}", is_error=True)
-        print(f"Backend error for query '{query}': {error}")
         self.pending_query = ""
 
     def on_busy_changed(self, busy):

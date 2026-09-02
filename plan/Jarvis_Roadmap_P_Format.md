@@ -69,7 +69,7 @@ Agent Integration ✅ Done
 
 ---
 
-## P6 — Failure-injection pass 🔵 Do next
+## P6 — Failure-injection pass ✅ Done
 
 **What**: three specific scenarios, each its own small test.
 1. LLM call raises mid-turn — does `run()` leave `self.messages`/the DB in a consistent state, or does it half-persist a turn?
@@ -81,7 +81,7 @@ Once these four are done, every information subsystem (State, Recall, Core Memor
 
 ---
 
-## P7 — Build a Real Agent Execution Loop ⬜ Planned
+## P7 — Build a Real Agent Execution Loop ✅ Done
 
 **What**: `agent.run()` currently has a fixed two-step interaction shape: one LLM call, optionally one round of tool/memory operations, then a final LLM call. P7 replaces this with a genuine **Agent Execution Loop** that can continue for an arbitrary number of model/tool turns within explicit safety limits.
 
@@ -329,7 +329,7 @@ P7.8 — Multi-step integration tests
 P7.9 — Infinite-loop / termination tests
 P7.10 — Real JARVIS visual execution trace
 
-## P8 — Formalize the operation/result protocol between Agent and future Capabilities ⬜ Planned
+## P8 — Formalize the operation/result protocol between Agent and future Capabilities ✅ Done
 
 **What**: right now, tool calls and memory operations are dispatched via two separate hand-rolled `if name in {...}` branches in `run()`. Before the Capability Controller exists (P9–P12), define the actual contract the Agent will use to talk to it: a structured request shape (operation name + arguments + any invocation metadata) and confirm your existing `OperationResult` model (already solid, built at P1) is the one true result shape for capabilities too, not just memory operations.
 **Why here**: P9 defines the Controller's *external* contract; this defines the *Agent's* side of that same conversation. Doing this first means P12 (the Controller itself) has a real contract to satisfy instead of being designed in a vacuum.
@@ -338,7 +338,7 @@ P7.10 — Real JARVIS visual execution trace
 
 ---
 
-## P9 — Capability & Operation contracts ⬜ Planned
+## P9 — Capability & Operation contracts ✅ Done
 
 **What**: the formal interfaces that every future capability will implement.
 - Capability interface + metadata (name, identity, version).
@@ -346,16 +346,16 @@ P7.10 — Real JARVIS visual execution trace
 - Operation schema — inputs, outputs, requirements.
 **Build target**: these are interfaces/contracts, not working code yet — the goal is a `capabilities/contracts.py` (or similar) that P11–P13 build against.
 
-## P10 — Operation Request / Result / State models ⬜ Planned
+## P10 — Operation Request / Result / State models ✅ Done
 
 **What**: `CapabilityRequest` (operation name + arguments + invocation metadata), a refined `OperationResult` (you already have a good one from P1 — extend it with the fuller state vocabulary from your own design: `SUCCESS`, `FAILED`, `PARTIAL`, `BLOCKED`, `INVALID`, `NOT_FOUND`, `REQUIRES_INPUT`, `IN_PROGRESS`, `CANCELLED` — you don't need every state on day one, add them as real capabilities need them), and `OperationState` lifecycle/cancellation semantics.
 **Principle to hold onto**: an operation reports *what happened*, not just success/failure — `NOT_FOUND: "Could not find VS Code"` vs `REQUIRES_INPUT: "Found 3 matching applications"` are different things the Agent needs to reason differently about.
 
-## P11 — Capability Registry ⬜ Planned
+## P11 — Capability Registry ✅ Done
 
 **What**: registration, lookup, discovery (`discover()` → all registered capabilities/operations), description (`describe(operation)` → purpose/inputs/outputs/requirements).
 
-## P12 — Capability Controller ⬜ Planned
+## P12 — Capability Controller ✅ Done
 
 **What**: the single governed gateway — `execute(request)` — that every capability operation must go through. No separate `result()` method; `execute()` returns the result directly, per your own earlier design decision.
 **Must include from day one**: validation, error normalization, logging. **Can wait**: permissions/governance beyond "did this validate," dependency management, versioning — add these when a real capability actually needs them, not preemptively.
@@ -365,7 +365,7 @@ P7.10 — Real JARVIS visual execution trace
 
 ---
 
-## P13 — Migrate `features/apps/` into the first real Capability ⬜ Planned
+## P13 — Migrate `features/apps/` into the first real Capability ✅ Done
 
 **What**: wrap your existing, already-solid Apps subsystem (discovery, resolver, launcher, verification, manager) behind the P9–P12 contracts. Expose `apps.find`, `apps.resolve`, `apps.launch` (and `apps.close` later) through the Controller.
 **Important**: this is packaging, not a rewrite. Your Apps internals are good — this phase proves the Controller works by putting one real, working capability through it, not by redesigning Apps.

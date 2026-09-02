@@ -34,6 +34,7 @@ __all__ = [
     "MemorySource",
     "RetentionReason",
     "OperationStatus",
+    "OperationState",
     "OperationErrorCode",
     "OperationResult",
     "classify_operation_exception",
@@ -85,6 +86,11 @@ def __getattr__(name: str):
         from jarvis.memory.operation_results import OperationStatus
 
         return OperationStatus
+
+    if name == "OperationState":
+        from jarvis.memory.operation_results import OperationState
+
+        return OperationState
 
     if name == "OperationErrorCode":
         from jarvis.memory.operation_results import OperationErrorCode

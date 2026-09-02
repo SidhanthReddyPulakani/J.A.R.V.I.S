@@ -27,19 +27,14 @@ class BackendBridge(QObject):
         #
         # Jarvis/
         # ├── .venv/
-        # │   └── Scripts/python.exe
         # └── backend/
         #     ├── main.py
         #     ├── jarvis/
         #     └── frontend/
         #         └── backend_bridge.py
-        #
-        # This file is two levels below the project root, so
-        # parents[2] is Jarvis/, while parents[1] is backend/.
         # --------------------------------------------------
 
         project_root = Path(__file__).resolve().parents[2]
-
         self.backend_dir = project_root / "backend"
 
         self.python_executable = (

@@ -87,6 +87,18 @@ from jarvis.core.agent_turn import (
     AgentToolCall,
     AgentTurnResult,
 )
+from jarvis.core.capability_request import (
+    CapabilityRequest,
+)
+from jarvis.capabilities.registry import (
+    CapabilityRegistry,
+)
+from jarvis.capabilities.controller import (
+    CapabilityController,
+)
+from jarvis.capabilities.bootstrap import (
+    build_default_registry,
+)
 from jarvis.core.agent_trace import (
     AgentExecutionTrace,
     AgentTraceStep,
@@ -110,6 +122,39 @@ class JarvisAgent:
 
     AGENT_ID = "jarvis"
     MAX_REASONING_STEPS = 10
+
+    # --------------------------------------------------
+    # P8 — the set of operation names handled by the Agent
+    # Memory Operation surface (P1) rather than an existing
+    # application tool (jarvis.core.tools).
+    #
+    # This is the same membership test that used to live
+    # inline in run() as an `if name in {...}` literal. P8
+    # names it so both `_execute_capability_request` and the
+    # tool-message formatting logic can share one definition
+    # instead of two copies drifting apart.
+    #
+    # This is still an internal detail of routing between two
+    # hand-rolled registries, not a real capability registry.
+    # A real, discoverable registry is P11's job.
+    # --------------------------------------------------
+
+    MEMORY_OPERATION_NAMES = frozenset(
+        {
+            "memory_read_core",
+            "memory_list_core",
+            "memory_replace_core",
+            "memory_append_core",
+            "memory_create",
+            "memory_get",
+            "memory_list",
+            "memory_delete",
+            "recall_search",
+            "knowledge_search",
+            "memory_search",
+        }
+    )
+
     def __init__(self) -> None:
 
         # --------------------------------------------------
@@ -308,6 +353,29 @@ class JarvisAgent:
             )
         )
         # --------------------------------------------------
+        # Capabilities (P9-P15)
+        #
+        # The Capability Registry and Controller are the single
+        # governed path for every capability operation (currently:
+        # apps.find / apps.resolve / apps.launch). Adding a new
+        # capability never touches this constructor — see
+        # jarvis.capabilities.bootstrap.build_default_registry.
+        #
+        # Memory operations (above) remain a separate, intentionally
+        # different surface and are not routed through here.
+        # --------------------------------------------------
+
+        self.capability_registry = (
+            build_default_registry()
+        )
+
+        self.capability_controller = (
+            CapabilityController(
+                self.capability_registry
+            )
+        )
+
+        # --------------------------------------------------
         # Context
         # --------------------------------------------------
 
@@ -393,15 +461,22 @@ class JarvisAgent:
         Return all tools available to the LLM.
 
         This combines the existing executable tools with
-        the Agent-managed information operations.
+        the Agent-managed information operations, plus every
+        operation exposed by a registered Capability.
 
-        The two surfaces remain separate internally:
+        The three surfaces remain separate internally:
 
-        - AVAILABLE_TOOLS contains normal application tools.
+        - AVAILABLE_TOOLS contains legacy application tools not yet
+          migrated behind a Capability.
         - memory operation definitions describe operations
           executed through AgentMemoryOperations.
+        - capability_registry.discover() returns every operation
+          exposed by a registered Capability (P9-P15) — a new
+          Capability shows up here automatically the moment it is
+          registered in jarvis.capabilities.bootstrap, with no
+          change needed in this method.
 
-        Both are presented to the LLM using the same
+        All three are presented to the LLM using the same
         model-compatible function-definition format.
         """
 
@@ -410,6 +485,12 @@ class JarvisAgent:
                 AVAILABLE_TOOLS.values()
             )
             + get_memory_operation_definitions()
+            + [
+                definition.to_llm_tool_definition()
+                for definition in (
+                    self.capability_registry.discover()
+                )
+            ]
         )
     
     def _execute_memory_operation(
@@ -511,7 +592,186 @@ class JarvisAgent:
                     ),
                 )
             )
-        
+
+    def _execute_application_tool(
+        self,
+        request: CapabilityRequest,
+    ) -> OperationResult:
+        """
+        Execute one existing application tool (jarvis.core.tools)
+        and normalize its outcome into an OperationResult.
+
+        This performs exactly the same lookup and execution the
+        Agent Execution Loop previously did inline inside run().
+        P8 only moves it behind the CapabilityRequest contract so
+        there is a single call site instead of a duplicated branch
+        living directly in the loop.
+
+        This is packaging, not a rewrite of the Apps subsystem —
+        AVAILABLE_TOOLS itself is untouched here. Migrating Apps
+        into a real Capability behind the P12 Controller is P13.
+        """
+
+        function = (
+            AVAILABLE_TOOLS.get(
+                request.operation
+            )
+        )
+
+        if function is None:
+
+            return (
+                OperationResult.failure_result(
+                    operation=request.operation,
+                    error_code=(
+                        OperationErrorCode.NOT_FOUND
+                    ),
+                    error_message=(
+                        f"Unknown tool: {request.operation}"
+                    ),
+                )
+            )
+
+        try:
+
+            result = function(
+                **request.arguments
+            )
+
+            return (
+                OperationResult.success_result(
+                    operation=request.operation,
+                    data=result,
+                )
+            )
+
+        except Exception as exc:
+
+            return (
+                OperationResult.failure_result(
+                    operation=request.operation,
+                    error_code=(
+                        classify_operation_exception(
+                            exc
+                        )
+                    ),
+                    error_message=str(
+                        exc
+                    ),
+                )
+            )
+
+    def _execute_capability_request(
+        self,
+        request: CapabilityRequest,
+    ) -> OperationResult:
+        """
+        Execute one normalized CapabilityRequest and return its
+        OperationResult.
+
+        This is the single entry point the Agent Execution Loop
+        (P7) uses to run a requested operation. Three internal
+        surfaces can end up handling it, checked in this order:
+
+        1. The Agent Memory Operation surface (P1) — unchanged,
+           still a separate, intentionally different surface.
+        2. The Capability Registry/Controller (P9-P15) — anything
+           whose address is registered by
+           jarvis.capabilities.bootstrap.build_default_registry is
+           routed through the real governed gateway,
+           `CapabilityController.execute(request)`. Adding a new
+           Capability never requires touching this method.
+        3. The legacy AVAILABLE_TOOLS registry — the fallback for
+           any tool not yet migrated behind a Capability.
+        """
+
+        if request.operation in self.MEMORY_OPERATION_NAMES:
+
+            return (
+                self._execute_memory_operation(
+                    name=request.operation,
+                    args=request.arguments,
+                )
+            )
+
+        if (
+            self.capability_registry.resolve_operation(
+                request.operation
+            )
+            is not None
+        ):
+
+            return (
+                self.capability_controller.execute(
+                    request
+                )
+            )
+
+        return (
+            self._execute_application_tool(
+                request
+            )
+        )
+
+    def _build_tool_message_content(
+        self,
+        request: CapabilityRequest,
+        operation_result: OperationResult,
+    ) -> str:
+        """
+        Render one OperationResult into the string content that is
+        fed back to the model as a "tool" message.
+
+        On success, this is always the operation's data.
+
+        On failure:
+
+        - A Capability-produced result (P10's OperationState, e.g.
+          REQUIRES_INPUT or NOT_FOUND) is shown exactly as the
+          Capability reported it — "Found 3 matching applications"
+          is not an exception and must never be dressed up as one.
+        - A legacy AVAILABLE_TOOLS exception keeps the
+          "Tool execution failed: ..." framing the model has always
+          seen for that case.
+        - Everything else (unknown operation, memory operation
+          failure) is shown as the operation's own error message,
+          unprefixed.
+        """
+
+        if operation_result.status == OperationStatus.SUCCESS:
+
+            return str(
+                operation_result.data
+            )
+
+        error_message = (
+            operation_result.error_message
+            or "Operation failed."
+        )
+
+        if operation_result.state is not None:
+
+            # A Capability always reports through OperationState —
+            # its message is the intended, final wording, not raw
+            # exception text to be re-framed.
+            return error_message
+
+        is_legacy_tool_exception = (
+            request.operation
+            not in self.MEMORY_OPERATION_NAMES
+            and operation_result.error_code
+            != OperationErrorCode.NOT_FOUND
+        )
+
+        if is_legacy_tool_exception:
+
+            return (
+                "Tool execution failed: "
+                f"{error_message}"
+            )
+
+        return error_message
+
     def _run_agent_turn(
         self,
         context,
@@ -927,140 +1187,26 @@ class JarvisAgent:
 
             for call in turn.tool_calls:
 
-                name = call.name
-
-                args = dict(
-                    call.arguments
-                )
-
                 # --------------------------------------------------
-                # Agent Memory Operation
+                # P8 — normalize the model's raw tool call into the
+                # one request shape every operation is executed
+                # through, regardless of which internal registry
+                # (Agent Memory Operations or existing application
+                # tools) ultimately handles it.
                 # --------------------------------------------------
 
-                if name in {
-                    "memory_read_core",
-                    "memory_list_core",
-                    "memory_replace_core",
-                    "memory_append_core",
-                    "memory_create",
-                    "memory_get",
-                    "memory_list",
-                    "memory_delete",
-                    "recall_search",
-                    "knowledge_search",
-                    "memory_search",
-                }:
-
-                    operation_result = (
-                        self._execute_memory_operation(
-                            name=name,
-                            args=args,
-                        )
-                    )
-
-                    self.operation_results.append(
-                        operation_result
-                    )
-
-                    self.messages.append(
-                        {
-                            "role": "tool",
-                            "tool_name": name,
-                            "content": (
-                                str(
-                                    operation_result.data
-                                )
-                                if operation_result.status
-                                == OperationStatus.SUCCESS
-                                else (
-                                    operation_result.error_message
-                                    or "Operation failed."
-                                )
-                            ),
-                        }
-                    )
-
-                    # --------------------------------------------------
-                    # Record observable operation outcome.
-                    # --------------------------------------------------
-
-                    trace_step.observations.append(
-                        AgentOperationObservation(
-                            tool_call_id=call.id,
-                            operation=name,
-                            result=operation_result,
-                        )
-                    )
-
-                    continue
-
-                # --------------------------------------------------
-                # Existing application tool
-                # --------------------------------------------------
-
-                function = (
-                    AVAILABLE_TOOLS.get(
-                        name
+                request = (
+                    CapabilityRequest.from_tool_call(
+                        call,
+                        step=step + 1,
                     )
                 )
 
-                if function is None:
-
-                    result = (
-                        f"Unknown tool: {name}"
+                operation_result = (
+                    self._execute_capability_request(
+                        request
                     )
-
-                    operation_result = (
-                        OperationResult.failure_result(
-                            operation=name,
-                            error_code=(
-                                OperationErrorCode.NOT_FOUND
-                            ),
-                            error_message=result,
-                        )
-                    )
-
-                else:
-
-                    try:
-
-                        result = function(
-                            **args
-                        )
-
-                        operation_result = (
-                            OperationResult.success_result(
-                                operation=name,
-                                data=result,
-                            )
-                        )
-
-                        result = str(
-                            result
-                        )
-
-                    except Exception as exc:
-
-                        error_code = (
-                            classify_operation_exception(
-                                exc
-                            )
-                        )
-
-                        result = (
-                            "Tool execution failed: "
-                            f"{exc}"
-                        )
-
-                        operation_result = (
-                            OperationResult.failure_result(
-                                operation=name,
-                                error_code=error_code,
-                                error_message=str(
-                                    exc
-                                ),
-                            )
-                        )
+                )
 
                 self.operation_results.append(
                     operation_result
@@ -1069,8 +1215,13 @@ class JarvisAgent:
                 self.messages.append(
                     {
                         "role": "tool",
-                        "tool_name": name,
-                        "content": result,
+                        "tool_name": request.operation,
+                        "content": (
+                            self._build_tool_message_content(
+                                request,
+                                operation_result,
+                            )
+                        ),
                     }
                 )
 
@@ -1081,7 +1232,7 @@ class JarvisAgent:
                 trace_step.observations.append(
                     AgentOperationObservation(
                         tool_call_id=call.id,
-                        operation=name,
+                        operation=request.operation,
                         result=operation_result,
                     )
                 )
