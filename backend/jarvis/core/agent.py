@@ -9,6 +9,7 @@ from jarvis.storage.repositories.agent_state import (
     AgentStateRepository,
 )
 
+import time
 
 from jarvis.memory.operation_results import (
     OperationResult,
@@ -111,10 +112,13 @@ SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
 1. Be concise and conversational.
-2. Use tools when the user's request requires a desktop action.
-3. Never claim an action was completed unless the tool result confirms it.
-4. Do not explain your internal reasoning.
-5. For simple commands, respond briefly.
+2. Use tools whenever the user's request requires a desktop action.
+3. When the user asks you to open, launch, run, or start an application, use the `apps.launch` tool with the application's name as the `query`.
+4. Do not tell the user that you cannot launch desktop applications when an appropriate tool is available.
+5. Never claim an action was completed unless the tool result confirms it.
+6. If a tool reports failure, use that result to decide what to do next.
+7. Do not explain your internal reasoning.
+8. For simple commands, respond briefly.
 """
 
 
@@ -835,6 +839,16 @@ class JarvisAgent:
             ),
         )
     
+    @staticmethod
+    def _strip_thinking(content: str) -> str:
+        if not content:
+            return ""
+
+        if "</think>" in content:
+            return content.split("</think>", 1)[1].strip()
+
+        return content.strip()
+    
     def _record_agent_turn(
         self,
         turn: AgentTurnResult,
@@ -853,6 +867,11 @@ class JarvisAgent:
 
         assistant_message = dict(
             turn.assistant_message
+        )
+        assistant_message["content"] = (
+            self._strip_thinking(
+                assistant_message.get("content", "")
+            )
         )
 
         if turn.tool_calls:

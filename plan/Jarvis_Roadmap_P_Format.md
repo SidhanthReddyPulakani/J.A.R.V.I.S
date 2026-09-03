@@ -1,6 +1,7 @@
 # J.A.R.V.I.S. — The Roadmap (P0 → P31)
 
 for /d /r . %d in (__pycache__) do @if exist "%d" rmdir /s /q "%d"   
+python -c "from jarvis.storage.database import database; database.initialize(); print('Database initialized')"
 
 **This file replaces everything you've been maintaining**: `Roadmap.txt`, `JARVIS_long_term_vision_and_build_plan.txt`, `architecture.txt`, `Jarvis_project_direction.txt`, `R2_10A___Context_Contract_Audit.txt`, `current_path.txt`, `current_state.txt`, and my own earlier `Jarvis_Master_Roadmap.md`. The Phase 0–11 / R2.1–R2.12 numbering is retired. From here on there is **one number line, P0 through P31**, in the exact order you should do the work. Nothing from the old docs is lost — every phase, sub-phase, and future capability listed in your vision doc is folded in below, just renumbered and sequenced by actual dependency order rather than by which document it originally lived in.
 

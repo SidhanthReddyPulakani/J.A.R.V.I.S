@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-
+import time
 from PySide6.QtCore import QObject, Signal, QProcess
 
 
@@ -15,7 +15,7 @@ class BackendBridge(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
+        self._request_started_at = None
         self.process = None
         self._buffer = ""
         self._busy = False
@@ -201,7 +201,7 @@ class BackendBridge(QObject):
 
         self._busy = True
         self.busy_changed.emit(True)
-
+        self._request_started_at = time.perf_counter()
         self._send({
             "type": "ask",
             "text": text,
@@ -312,6 +312,36 @@ class BackendBridge(QObject):
 
         if message_type == "response":
 
+            elapsed = None
+
+            if self._request_started_at is not None:
+                elapsed = time.perf_counter() - self._request_started_at
+
+            self._request_started_at = None
+
+            self._busy = False
+            self.busy_changed.emit(False)
+
+            response = message.get(
+                "response",
+                ""
+            )
+
+            if elapsed is not None:
+                print(
+                    f"[BackendBridge] Response received "
+                    f"in {elapsed:.2f}s"
+                )
+            else:
+                print(
+                    "[BackendBridge] Response received."
+                )
+
+            self.response_ready.emit(
+                str(response)
+            )
+
+            return
             self._busy = False
             self.busy_changed.emit(False)
 
@@ -332,6 +362,13 @@ class BackendBridge(QObject):
 
         if message_type == "error":
 
+            elapsed = None
+
+            if self._request_started_at is not None:
+                elapsed = time.perf_counter() - self._request_started_at
+
+            self._request_started_at = None
+
             self._busy = False
             self.busy_changed.emit(False)
 
@@ -340,16 +377,22 @@ class BackendBridge(QObject):
                 "Unknown backend error."
             )
 
-            print(
-                f"[BackendBridge] Backend error: {error}"
-            )
+            if elapsed is not None:
+                print(
+                    f"[BackendBridge] Backend error after "
+                    f"{elapsed:.2f}s: {error}"
+                )
+            else:
+                print(
+                    f"[BackendBridge] Backend error: {error}"
+                )
 
             self.error.emit(
                 str(error)
             )
 
             return
-
+        
         print(
             f"[BackendBridge] Unknown message: {message}"
         )

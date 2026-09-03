@@ -8,7 +8,7 @@ from jarvis.memory.operation_results import (
     OperationStatus,
 )
 
-from test_agent_reasoning_loop import (
+from backend.new_tests.test_agent_reasoning_loop import (
     FakeLLM,
     make_agent,
     make_response,

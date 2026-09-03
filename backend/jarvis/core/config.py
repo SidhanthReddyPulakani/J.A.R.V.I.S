@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
-
+import sys
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data"
@@ -12,7 +12,7 @@ LOG_DIR = ROOT_DIR / "logs"
 class Settings:
     llm_model: str = os.getenv(
         "JARVIS_LLM_MODEL",
-        "qwen3.5:4b",
+        "qwen3:4b",
     )
 
     ollama_host: str = os.getenv(
@@ -27,7 +27,7 @@ class Settings:
     context_size: int = int(
         os.getenv(
             "JARVIS_CONTEXT_SIZE",
-            "32768",
+            "8192",
         )
     )
 
@@ -69,3 +69,4 @@ class Settings:
 
 
 settings = Settings()
+print(f"[CONFIG DEBUG] JARVIS_THINK={settings.think}", file=sys.stderr)
