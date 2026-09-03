@@ -9,8 +9,6 @@ from jarvis.storage.repositories.agent_state import (
     AgentStateRepository,
 )
 
-import time
-
 from jarvis.memory.operation_results import (
     OperationResult,
     OperationErrorCode,
@@ -108,6 +106,12 @@ from jarvis.core.agent_trace import (
 from jarvis.core.agent_observation import (
     AgentOperationObservation,
 )
+
+from jarvis.core.reasoning_controller import (
+    ReasoningController,
+    ReasoningState,
+)
+
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
@@ -775,62 +779,118 @@ class JarvisAgent:
             )
 
         return error_message
+    
+    def _has_complete_tool_call(
+        self,
+        tool_call,
+    ) -> bool:
+        function = getattr(
+            tool_call,
+            "function",
+            None,
+        )
 
+        if function is None:
+            return False
+
+        name = getattr(
+            function,
+            "name",
+            None,
+        )
+
+        arguments = getattr(
+            function,
+            "arguments",
+            None,
+        )
+
+        if not name:
+            return False
+
+        if arguments is None:
+            return False
+
+        return True
+    
     def _run_agent_turn(
         self,
         context,
     ) -> AgentTurnResult:
         """
-        Execute exactly one LLM interaction and normalize
-        the provider response into the Agent Turn contract.
+        Execute one streamed LLM interaction and normalize
+        observations into the Agent Turn contract.
 
-        This method does not execute tools, mutate memory,
-        persist messages, rebuild context, or control the
-        reasoning loop.
+        Phase 3:
+            A complete structured tool call is an immediate
+            commit signal and terminates the stream.
 
-        Those responsibilities remain with the Agent runtime.
-
-        The method therefore establishes the boundary:
-
-            provider response
-                ↓
-            AgentTurnResult
+        This method does not execute tools or control the
+        broader reasoning loop.
         """
 
-        response = self.llm.chat(
+        content_parts = []
+        tool_calls = []
+
+        for chunk in self.llm.stream(
             messages=context.as_messages(),
             tools=self._get_llm_tools(),
-        )
+        ):
+            content = (
+                chunk.get("content")
+                or ""
+            )
 
-        message = response.message
+            if content:
+                content_parts.append(
+                    content
+                )
+
+            chunk_tool_calls = (
+                chunk.get("tool_calls")
+                or []
+            )
+
+            if chunk_tool_calls:
+
+                complete_tool_calls = [
+                    call
+                    for call in chunk_tool_calls
+                    if self._has_complete_tool_call(
+                        call
+                    )
+                ]
+
+                if complete_tool_calls:
+
+                    for call in complete_tool_calls:
+
+                        tool_calls.append(
+                            AgentToolCall(
+                                id=getattr(
+                                    call,
+                                    "id",
+                                    None,
+                                ),
+                                name=call.function.name,
+                                arguments=dict(
+                                    call.function.arguments
+                                ),
+                            )
+                        )
+
+                    # Phase 3 commit signal.
+                    break
+
+            if chunk.get("done", False):
+                break
 
         assistant_message = {
             "role": "assistant",
-            "content": (
-                message.content
-                or ""
+            "content": "".join(
+                content_parts
             ),
         }
-
-        tool_calls = []
-
-        for call in (
-            message.tool_calls
-            or []
-        ):
-            tool_calls.append(
-                AgentToolCall(
-                    id=getattr(
-                        call,
-                        "id",
-                        None,
-                    ),
-                    name=call.function.name,
-                    arguments=dict(
-                        call.function.arguments
-                    ),
-                )
-            )
 
         return AgentTurnResult(
             assistant_message=assistant_message,
@@ -1082,6 +1142,8 @@ class JarvisAgent:
             AgentExecutionTrace()
         )
 
+        reasoning_controller = ReasoningController()
+
         user_message = {
             "role": "user",
             "content": user_input,
@@ -1137,7 +1199,7 @@ class JarvisAgent:
         for step in range(
             self.MAX_REASONING_STEPS
         ):
-
+            reasoning_controller.start_generation()
             # --------------------------------------------------
             # Rebuild context after the first reasoning step.
             #
@@ -1157,6 +1219,17 @@ class JarvisAgent:
                 context
             )
 
+            if turn.completed:
+
+                reasoning_controller.observe(
+                    final_answer=True
+                )
+
+            else:
+
+                reasoning_controller.observe(
+                    actionable_tool_call=True
+                )
             # --------------------------------------------------
             # Preserve the assistant turn, including tool calls.
             # --------------------------------------------------
@@ -1255,7 +1328,17 @@ class JarvisAgent:
                         result=operation_result,
                     )
                 )
+            # --------------------------------------------------
+            # Phase 6 — Evidence-driven continuation.
+            #
+            # Capability results are new evidence. Another model
+            # cycle is permitted only when the task remains
+            # unresolved after that evidence.
+            # --------------------------------------------------
 
+            reasoning_controller.continue_after_evidence(
+                task_unresolved=True
+            )
         # --------------------------------------------------
         # Safety termination
         #
@@ -1263,7 +1346,9 @@ class JarvisAgent:
         # step requested further operations and none produced
         # normal model completion.
         # --------------------------------------------------
-
+        if reasoning_controller.state == ReasoningState.GENERATING:
+            reasoning_controller.abort()
+            
         if final_text is None:
 
             final_text = (
