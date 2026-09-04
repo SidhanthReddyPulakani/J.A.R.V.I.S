@@ -8,6 +8,7 @@ class ReasoningState(str, Enum):
     COMMIT = "commit"
     COMPLETE = "complete"
     CONTINUE = "continue"
+    INTERVENE = "intervene"
     ABORT = "abort"
 
 
@@ -15,27 +16,22 @@ class ReasoningController:
     """
     Deterministic reasoning-control state machine.
 
-    Phase 5 deliberately contains no intelligence:
-    - no confidence score
-    - no stagnation detection
-    - no evidence scoring
-    - no continuation policy
-
-    It only makes the existing Agent transitions explicit.
+    Phase 7 adds one bounded stagnation intervention.
+    The controller does not decide whether a trajectory is
+    stagnant; StagnationDetector owns that observation.
     """
 
     def __init__(self) -> None:
         self.state: ReasoningState | None = None
+        self.intervention_count = 0
+        self.max_interventions = 1
 
     def start_generation(self) -> ReasoningState:
-        """
-        Enter a model-generation cycle.
-        """
-
         if self.state not in (
             None,
             ReasoningState.COMMIT,
             ReasoningState.CONTINUE,
+            ReasoningState.INTERVENE,
         ):
             raise RuntimeError(
                 "Cannot start generation from "
@@ -43,26 +39,18 @@ class ReasoningController:
             )
 
         self.state = ReasoningState.GENERATING
-
         return self.state
-    
+
     def continue_after_evidence(
         self,
         *,
         task_unresolved: bool,
     ) -> ReasoningState:
-        """
-        Decide whether another reasoning cycle is justified
-        by newly produced capability evidence.
-
-        COMMIT -> CONTINUE when the task remains unresolved.
-        COMMIT -> COMPLETE when the task is resolved.
-        """
-
         if self.state != ReasoningState.COMMIT:
             raise RuntimeError(
                 "Can only evaluate continuation after "
-                f"COMMIT, currently {self.state.value if self.state else 'START'}."
+                f"COMMIT, currently "
+                f"{self.state.value if self.state else 'START'}."
             )
 
         if task_unresolved:
@@ -71,6 +59,7 @@ class ReasoningController:
             self.state = ReasoningState.COMPLETE
 
         return self.state
+
     def observe(
         self,
         *,
@@ -78,11 +67,6 @@ class ReasoningController:
         final_answer: bool = False,
         ceiling_reached: bool = False,
     ) -> ReasoningState:
-        """
-        Apply deterministic observations to the current
-        generation cycle.
-        """
-
         if self.state != ReasoningState.GENERATING:
             current_state = (
                 self.state.value
@@ -110,14 +94,31 @@ class ReasoningController:
         raise RuntimeError(
             "Generation produced no recognized terminal transition."
         )
+
+    def intervene(self) -> ReasoningState:
+        """
+        Request one bounded recovery cycle after stagnation.
+
+        A second intervention is not permitted. The caller should
+        abort rather than allowing an unbounded reasoning loop.
+        """
+
+        if self.state != ReasoningState.GENERATING:
+            raise RuntimeError(
+                "Can only intervene from GENERATING, currently "
+                f"{self.state.value if self.state else 'START'}."
+            )
+
+        if self.intervention_count >= self.max_interventions:
+            self.state = ReasoningState.ABORT
+            return self.state
+
+        self.intervention_count += 1
+        self.state = ReasoningState.INTERVENE
+
+        return self.state
+
     def commit(self) -> ReasoningState:
-        """
-        Explicitly transition to COMMIT.
-
-        Convenience method for tests and callers that already
-        determined the structured action is actionable.
-        """
-
         if self.state != ReasoningState.GENERATING:
             raise RuntimeError(
                 "Cannot commit from "
@@ -128,10 +129,6 @@ class ReasoningController:
         return self.state
 
     def complete(self) -> ReasoningState:
-        """
-        Explicitly transition to COMPLETE.
-        """
-
         if self.state != ReasoningState.GENERATING:
             raise RuntimeError(
                 "Cannot complete from "
@@ -142,13 +139,10 @@ class ReasoningController:
         return self.state
 
     def abort(self) -> ReasoningState:
-        """
-        Explicitly transition to ABORT.
-        """
-
         if self.state not in (
             ReasoningState.GENERATING,
             ReasoningState.COMMIT,
+            ReasoningState.INTERVENE,
         ):
             raise RuntimeError(
                 "Cannot abort from "

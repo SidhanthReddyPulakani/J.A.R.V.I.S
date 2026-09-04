@@ -112,6 +112,10 @@ from jarvis.core.reasoning_controller import (
     ReasoningState,
 )
 
+from jarvis.core.stagnation_detector import (
+    StagnationDetector,
+)   
+
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
@@ -1096,6 +1100,7 @@ class JarvisAgent:
             compiled
         )
         # ======================================================
+      
     # STATE
     # ======================================================
 
@@ -1143,6 +1148,19 @@ class JarvisAgent:
         )
 
         reasoning_controller = ReasoningController()
+
+        stagnation_detector = StagnationDetector(
+            window_size=3
+        )
+
+        # --------------------------------------------------
+        # Phase 7 — temporary reasoning intervention.
+        #
+        # This is consumed by _build_context() for one
+        # reasoning cycle only. It is never persisted.
+        # --------------------------------------------------
+
+        self.reasoning_intervention = None
 
         user_message = {
             "role": "user",
@@ -1199,7 +1217,9 @@ class JarvisAgent:
         for step in range(
             self.MAX_REASONING_STEPS
         ):
+
             reasoning_controller.start_generation()
+
             # --------------------------------------------------
             # Rebuild context after the first reasoning step.
             #
@@ -1219,6 +1239,74 @@ class JarvisAgent:
                 context
             )
 
+            # --------------------------------------------------
+            # Phase 7 — Stagnation detection.
+            #
+            # Detect before ReasoningController.observe()
+            # so intervention occurs while the controller is
+            # still in GENERATING.
+            # --------------------------------------------------
+
+            tool_intents = tuple(
+                f"{call.name}:{sorted(call.arguments.items())}"
+                for call in turn.tool_calls
+            )
+
+            stagnation_observation = (
+                stagnation_detector.observe(
+                    content=turn.assistant_message.get(
+                        "content",
+                        "",
+                    ),
+                    tool_intents=tool_intents,
+                    new_action_information=(
+                        bool(turn.tool_calls)
+                        or bool(self.operation_results)
+                    ),
+                )
+            )
+
+            # --------------------------------------------------
+            # Phase 7 — Bounded intervention.
+            #
+            # First detected stall:
+            #     intervene → fresh reasoning cycle
+            #
+            # Repeated stall after intervention:
+            #     controller aborts
+            #
+            # The intervention is deliberately placed before
+            # normal tool execution so a stagnant tool request
+            # is not executed a second time automatically.
+            # --------------------------------------------------
+
+            if stagnation_observation.stagnant:
+
+                reasoning_controller.intervene()
+
+                if (
+                    reasoning_controller.state
+                    == ReasoningState.ABORT
+                ):
+                    break
+
+                stagnation_detector.reset()
+
+                self.reasoning_intervention = (
+                    "The previous reasoning cycle did not make "
+                    "useful progress. Re-evaluate the task from "
+                    "the available evidence and choose the next "
+                    "useful action or provide the final answer. "
+                    "Do not repeat an action that has already "
+                    "succeeded."
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # Normal reasoning state transition.
+            # --------------------------------------------------
+
             if turn.completed:
 
                 reasoning_controller.observe(
@@ -1230,6 +1318,7 @@ class JarvisAgent:
                 reasoning_controller.observe(
                     actionable_tool_call=True
                 )
+
             # --------------------------------------------------
             # Preserve the assistant turn, including tool calls.
             # --------------------------------------------------
@@ -1328,6 +1417,7 @@ class JarvisAgent:
                         result=operation_result,
                     )
                 )
+
             # --------------------------------------------------
             # Phase 6 — Evidence-driven continuation.
             #
@@ -1339,6 +1429,7 @@ class JarvisAgent:
             reasoning_controller.continue_after_evidence(
                 task_unresolved=True
             )
+
         # --------------------------------------------------
         # Safety termination
         #
@@ -1346,9 +1437,13 @@ class JarvisAgent:
         # step requested further operations and none produced
         # normal model completion.
         # --------------------------------------------------
-        if reasoning_controller.state == ReasoningState.GENERATING:
+
+        if (
+            reasoning_controller.state
+            == ReasoningState.GENERATING
+        ):
             reasoning_controller.abort()
-            
+
         if final_text is None:
 
             final_text = (
