@@ -1,3 +1,4 @@
+import time
 from ollama import ResponseError
 
 from jarvis.core.llm import LLMClient
@@ -115,6 +116,9 @@ from jarvis.core.reasoning_controller import (
 from jarvis.core.stagnation_detector import (
     StagnationDetector,
 )   
+from jarvis.core.reasoning_observer import (
+    ReasoningObserver,
+)
 
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
@@ -820,6 +824,7 @@ class JarvisAgent:
     def _run_agent_turn(
         self,
         context,
+        reasoning_observer: ReasoningObserver,
     ) -> AgentTurnResult:
         """
         Execute one streamed LLM interaction and normalize
@@ -829,17 +834,47 @@ class JarvisAgent:
             A complete structured tool call is an immediate
             commit signal and terminates the stream.
 
+        Phase 8.2:
+            ReasoningObserver observes the streamed reasoning
+            trajectory but does not control termination.
+
         This method does not execute tools or control the
         broader reasoning loop.
         """
 
         content_parts = []
+        thinking_parts = []
         tool_calls = []
+
+        reasoning_started_at = None
 
         for chunk in self.llm.stream(
             messages=context.as_messages(),
             tools=self._get_llm_tools(),
         ):
+            thinking = (
+                chunk.get("thinking")
+                or ""
+            )
+
+            if thinking:
+                if reasoning_started_at is None:
+                    reasoning_started_at = time.perf_counter()
+
+                thinking_parts.append(thinking)
+
+                elapsed_ms = (
+                    time.perf_counter()
+                    - reasoning_started_at
+                ) * 1000.0
+
+                reasoning_observer.observe(
+                    thinking="".join(
+                        thinking_parts
+                    ),
+                    elapsed_ms=elapsed_ms,
+                )
+
             content = (
                 chunk.get("content")
                 or ""
@@ -883,7 +918,7 @@ class JarvisAgent:
                             )
                         )
 
-                    # Phase 3 commit signal.
+                    # Existing Phase 3 commit signal.
                     break
 
             if chunk.get("done", False):
@@ -902,7 +937,6 @@ class JarvisAgent:
                 tool_calls
             ),
         )
-    
     @staticmethod
     def _strip_thinking(content: str) -> str:
         if not content:
@@ -1149,6 +1183,8 @@ class JarvisAgent:
 
         reasoning_controller = ReasoningController()
 
+        reasoning_observer = ReasoningObserver()    
+
         stagnation_detector = StagnationDetector(
             window_size=3
         )
@@ -1236,7 +1272,8 @@ class JarvisAgent:
             # --------------------------------------------------
 
             turn = self._run_agent_turn(
-                context
+                context,
+                reasoning_observer,
             )
 
             # --------------------------------------------------
