@@ -10,7 +10,7 @@ PROMPTS = [
     (
         "strong_commit",
         (
-            "Hello Jarvis.\n\n"
+            "Open Whatsapp.\n\n"
             "Reason only as much as necessary to identify the correct "
             "capability and arguments. For this request, once you have "
             "identified a valid operation, immediately call the capability. "
