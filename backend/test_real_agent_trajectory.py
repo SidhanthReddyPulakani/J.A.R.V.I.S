@@ -119,32 +119,30 @@ def main():
     print("TEST 4 — REAL AGENT TRAJECTORY")
     print("=" * 72)
 
-    agent = JarvisAgent()
-
-    method_name = find_public_run_method(agent)
-
-    if method_name is None:
-        print(
-            "\nERROR: Could not identify the public Agent execution "
-            "method automatically."
-        )
-        print(
-            "Do not change production code. Send me this output and "
-            "I will wire the exact method from the repository."
-        )
-        return
-
-    method = getattr(agent, method_name)
-
-    print(
-        f"\nSelected Agent entry point: "
-        f"{method_name}"
-    )
 
     for task in TASKS:
-        print("\n" + "=" * 72)
-        print(f"TASK: {task}")
-        print("=" * 72)
+        agent = JarvisAgent()
+        agent.state.conversation_id = agent.recall.create_conversation()
+        agent.messages = []
+        method_name = find_public_run_method(agent)
+
+        if method_name is None:
+            print(
+                "\nERROR: Could not identify the public Agent execution "
+                "method automatically."
+            )
+            print(
+                "Do not change production code. Send me this output and "
+                "I will wire the exact method from the repository."
+            )
+            return
+
+        method = getattr(agent, method_name)
+
+        print(
+            f"\nSelected Agent entry point: "
+            f"{method_name}"
+        )
 
         before_results = len(
             getattr(agent, "operation_results", [])
