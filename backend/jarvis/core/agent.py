@@ -108,6 +108,16 @@ from jarvis.core.agent_trace import (
 from jarvis.core.agent_observation import (
     AgentOperationObservation,
 )
+
+from jarvis.computation import (
+    ComputationController,
+    ComputationPhase,
+    ComputationState,
+    DemandSignal,
+    DemandSignalStatus,
+    DemandSignals,
+)
+
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
@@ -393,6 +403,10 @@ class JarvisAgent:
             ContextWindowManager()
         )
 
+        self.computation_controller = (
+            ComputationController()
+        )
+
         # --------------------------------------------------
         # In-memory conversation representation
         #
@@ -460,6 +474,7 @@ class JarvisAgent:
             self.memory_formation.form(
                 candidate
             )
+
     def _get_llm_tools(self) -> list[dict]:
         """
         Return all tools available to the LLM.
@@ -1059,17 +1074,208 @@ class JarvisAgent:
         )
 
         return self.enabled
+
     # ======================================================
-    # RUN
+    # ADAPTIVE COMPUTATION
     # ======================================================
+
+    @staticmethod
+    def _build_initial_computation_signals(
+        user_input: str,
+    ) -> DemandSignals:
+        """
+        Build the initial computation-demand snapshot.
+
+        O1 deliberately starts conservatively. The initial
+        controller evaluation should use only information
+        already available before the first LLM call.
+
+        More sophisticated runtime signals are populated
+        after LLM/tool execution.
+        """
+
+        return DemandSignals(
+            goal_resolution=DemandSignal(
+                name="goal_resolution",
+                value=False,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            unresolved_requirements=DemandSignal(
+                name="unresolved_requirements",
+                value=True,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            reasoning_step=DemandSignal(
+                name="reasoning_step",
+                value=0,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+        )
+
+    @staticmethod
+    def _build_pre_llm_computation_signals(
+        computation_state: ComputationState,
+    ) -> DemandSignals:
+        """
+        Build the computation snapshot immediately before
+        an LLM call.
+        """
+
+        return DemandSignals(
+            reasoning_step=DemandSignal(
+                name="reasoning_step",
+                value=computation_state.reasoning_step,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            elapsed_computation=DemandSignal(
+                name="elapsed_computation",
+                value=computation_state.elapsed_seconds(),
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+        )
+
+    @staticmethod
+    def _build_post_llm_computation_signals(
+        computation_state: ComputationState,
+        tool_requested: bool,
+    ) -> DemandSignals:
+        """
+        Build the computation snapshot after an LLM response.
+
+        This does not attempt to infer hidden reasoning.
+        It only exposes observable Agent-level information.
+        """
+
+        return DemandSignals(
+            reasoning_step=DemandSignal(
+                name="reasoning_step",
+                value=computation_state.reasoning_step,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            elapsed_computation=DemandSignal(
+                name="elapsed_computation",
+                value=computation_state.elapsed_seconds(),
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            unresolved_requirements=DemandSignal(
+                name="unresolved_requirements",
+                value=tool_requested,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+        )
+
+    @staticmethod
+    def _build_post_execution_computation_signals(
+        computation_state: ComputationState,
+        operation_result: OperationResult,
+    ) -> DemandSignals:
+        """
+        Build the computation snapshot after capability/tool
+        execution.
+        """
+
+        failed = (
+            operation_result.status
+            == OperationStatus.FAILURE
+        )
+
+        return DemandSignals(
+            tool_execution_status=DemandSignal(
+                name="tool_execution_status",
+                value=(
+                    "failed"
+                    if failed
+                    else "success"
+                ),
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            tool_failure_count=DemandSignal(
+                name="tool_failure_count",
+                value=computation_state.tool_failure_count,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            reasoning_step=DemandSignal(
+                name="reasoning_step",
+                value=computation_state.reasoning_step,
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+            elapsed_computation=DemandSignal(
+                name="elapsed_computation",
+                value=computation_state.elapsed_seconds(),
+                status=DemandSignalStatus.AVAILABLE,
+            ),
+        )
+
+    @staticmethod
+    def _update_computation_execution_state(
+        computation_state: ComputationState,
+        operation_result: OperationResult,
+    ) -> None:
+        """
+        Update transient computation counters from an
+        executed operation.
+        """
+
+        if (
+            operation_result.status
+            == OperationStatus.FAILURE
+        ):
+            computation_state.tool_failure_count += 1
+
+    def _apply_computation_decision(
+        self,
+        decision,
+        computation_state: ComputationState,
+    ) -> bool:
+        """
+        Apply the controller's decision at the Agent boundary.
+
+        Returns True when the Agent must terminate the
+        current reasoning run.
+        """
+
+        if decision.action.value == "abort":
+            computation_state.terminal = True
+            computation_state.aborted = True
+            return True
+
+        if decision.action.value == "finish":
+            computation_state.terminal = True
+            return True
+
+        # CONTINUE, ESCALATE, and DEESCALATE are non-terminal.
+        #
+        # ComputationState.apply_decision() has already updated
+        # the active mode when the controller evaluated the
+        # decision. The resulting mode therefore governs the
+        # next computation cycle.
+        return False
     # ======================================================
     # RUN
     # ======================================================
     def run(
         self,
         user_input: str,
+        
     ) -> str:
+        
+        computation_state = ComputationState()
 
+        initial_signals = (
+            self._build_initial_computation_signals(
+                user_input
+            )
+        )
+
+        initial_decision = (
+            self.computation_controller.initial(
+                state=computation_state,
+                signals=initial_signals,
+            )
+        )
+
+        if initial_decision.terminal:
+            return
         # --------------------------------------------------
         # Execution trace
         #
@@ -1138,6 +1344,26 @@ class JarvisAgent:
             self.MAX_REASONING_STEPS
         ):
 
+            computation_state.advance_reasoning_step()
+
+            pre_llm_signals = (
+                self._build_pre_llm_computation_signals(
+                    computation_state
+                )
+            )
+
+            pre_llm_decision = (
+                self.computation_controller.pre_llm(
+                    state=computation_state,
+                    signals=pre_llm_signals,
+                )
+            )
+
+            if self._apply_computation_decision(
+                pre_llm_decision,
+                computation_state,
+            ):
+                break
             # --------------------------------------------------
             # Rebuild context after the first reasoning step.
             #
@@ -1156,7 +1382,45 @@ class JarvisAgent:
             turn = self._run_agent_turn(
                 context
             )
+            post_llm_signals = (
+                self._build_post_llm_computation_signals(
+                    computation_state=computation_state,
+                    tool_requested=bool(turn.tool_calls),
+                )
+            )
 
+            post_llm_decision = (
+                self.computation_controller.post_llm(
+                    state=computation_state,
+                    signals=post_llm_signals,
+                )
+            )
+
+            if (
+                post_llm_decision.action.value
+                == "finish"
+            ):
+                final_text = (
+                    turn.assistant_message.get(
+                        "content",
+                        "",
+                    )
+                    or "I'm ready."
+                )
+
+                self.last_execution_trace.terminate(
+                    AgentTerminationReason.MODEL_COMPLETED
+                )
+
+                computation_state.terminal = True
+
+                break
+
+            if self._apply_computation_decision(
+                post_llm_decision,
+                computation_state,
+            ):
+                break   
             # --------------------------------------------------
             # Preserve the assistant turn, including tool calls.
             # --------------------------------------------------
@@ -1203,7 +1467,7 @@ class JarvisAgent:
             # Execute every operation requested by this
             # model turn.
             # --------------------------------------------------
-
+            execution_aborted = False
             for call in turn.tool_calls:
 
                 # --------------------------------------------------
@@ -1230,6 +1494,53 @@ class JarvisAgent:
                 self.operation_results.append(
                     operation_result
                 )
+                self._update_computation_execution_state(
+                    computation_state,
+                    operation_result,
+                )
+
+                post_execution_signals = (
+                    self._build_post_execution_computation_signals(
+                        computation_state=computation_state,
+                        operation_result=operation_result,
+                    )
+                )
+
+                post_execution_decision = (
+                    self.computation_controller.post_execution(
+                        state=computation_state,
+                        signals=post_execution_signals,
+                    )
+                )
+
+                if (
+                    post_execution_decision.action.value
+                    == "finish"
+                ):
+                    execution_aborted = True
+
+                    final_text = (
+                        turn.assistant_message.get(
+                            "content",
+                            "",
+                        )
+                        or "The operation completed successfully."
+                    )
+
+                    computation_state.terminal = True
+
+                    self.last_execution_trace.terminate(
+                        AgentTerminationReason.MODEL_COMPLETED
+                    )
+
+                    break
+
+                if self._apply_computation_decision(
+                    post_execution_decision,
+                    computation_state,
+                ):
+                    execution_aborted = True
+                    break
 
                 self.messages.append(
                     {
@@ -1255,7 +1566,8 @@ class JarvisAgent:
                         result=operation_result,
                     )
                 )
-
+            if execution_aborted:
+                break
         # --------------------------------------------------
         # Safety termination
         #
