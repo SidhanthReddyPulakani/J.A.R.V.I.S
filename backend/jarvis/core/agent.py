@@ -811,27 +811,25 @@ class JarvisAgent:
     def _run_agent_turn(
         self,
         context,
+        computation_state: ComputationState,
     ) -> AgentTurnResult:
         """
-        Execute exactly one LLM interaction and normalize
-        the provider response into the Agent Turn contract.
+        Execute exactly one LLM interaction.
 
-        This method does not execute tools, mutate memory,
-        persist messages, rebuild context, or control the
-        reasoning loop.
-
-        Those responsibilities remain with the Agent runtime.
-
-        The method therefore establishes the boundary:
-
-            provider response
-                ↓
-            AgentTurnResult
+        The active O1 computation state is converted into an
+        execution profile and passed to the runtime LLM adapter.
         """
+
+        computation_profile = (
+            self.llm.profile_for_mode(
+                computation_state.mode
+            )
+        )
 
         response = self.llm.chat(
             messages=context.as_messages(),
             tools=self._get_llm_tools(),
+            profile=computation_profile,
         )
 
         message = response.message
@@ -1418,7 +1416,8 @@ class JarvisAgent:
             # --------------------------------------------------
 
             turn = self._run_agent_turn(
-                context
+                context=context,
+                computation_state=computation_state,
             )
             post_llm_signals = (
                 self._build_post_llm_computation_signals(

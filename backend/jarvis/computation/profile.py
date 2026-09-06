@@ -15,8 +15,9 @@ class ComputationProfile:
     Describes how the next LLM computation should be performed.
 
     This is an execution profile, not a policy decision.
-    The ComputationController decides which profile should
-    be used. Runtime-specific adapters interpret it later.
+
+    The ComputationController decides the computation mode.
+    Runtime-specific adapters interpret this profile.
     """
 
     mode: ComputationMode
@@ -30,3 +31,35 @@ class ComputationProfile:
     model_options: dict[str, Any] = field(
         default_factory=dict
     )
+
+    @classmethod
+    def from_mode(
+        cls,
+        mode: ComputationMode,
+    ) -> "ComputationProfile":
+        """
+        Translate the controller's computation mode into the
+        runtime-independent execution profile.
+
+        No model-specific assumptions are made here.
+        """
+
+        if mode == ComputationMode.FAST:
+            return cls(
+                mode=mode,
+                prompt_profile="fast",
+                thinking_policy="disabled",
+            )
+
+        if mode == ComputationMode.NORMAL:
+            return cls(
+                mode=mode,
+                prompt_profile="normal",
+                thinking_policy="default",
+            )
+
+        return cls(
+            mode=mode,
+            prompt_profile="deep",
+            thinking_policy="enabled",
+        )
