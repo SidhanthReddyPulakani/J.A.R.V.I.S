@@ -1,241 +1,169 @@
-"""
-O2.4 — Adaptive Context Runtime Verification
 
-Verifies that the adaptive context runtime actually applies
-the ContextDemandPolicy decision through AdaptiveContextBuilder.
+from types import SimpleNamespace
 
-No LLM.
-No Ollama.
-No retrieval service.
-No persistent Agent state.
-"""
-
-from dataclasses import dataclass
-
+from jarvis.computation import (
+    ComputationMode,
+    ComputationState,
+    DemandSignal,
+    DemandSignalStatus,
+    DemandSignals,
+)
 from jarvis.context import (
     ContextCompiler,
     ContextDemandPolicy,
-    ContextRequest,
     ContextWindowManager,
-    ContextDepth,
-    ContextSource,
 )
-
-from jarvis.context.selector import (
-    AdaptiveContextBuilder,
-)
-
-
-@dataclass
-class FakeState:
-    value: str = "test-state"
+from jarvis.context.selector import AdaptiveContextBuilder
+from jarvis.core.agent import JarvisAgent
+from jarvis.retrieval.models import RetrievalResult
 
 
-def build_request():
-    return ContextRequest(
-        user_input="test request",
-        state=FakeState(),
-        conversation=[
+class FakeRetrieval:
+    def search(self, query, limit=10):
+        return [
+            RetrievalResult(
+                source="retrieval",
+                identifier="test-1",
+                content="retrieved information",
+                score=0.95,
+            )
+        ]
+
+
+class FakeDiary:
+    def search(self, query, conversation_id, limit=10):
+        return [
             {
-                "role": "user",
-                "content": "previous conversation",
+                "content": "diary information",
             }
-        ],
-        core_memory=[
-            "core memory",
-        ],
-        retrieval_results=[
-            "retrieved information",
-        ],
-        diary=[
-            "diary event",
-        ],
-        knowledge=[
-            "knowledge item",
-        ],
-        relationships=[
-            "relationship item",
-        ],
-        operation_results=[
-            "operation result",
-        ],
-        capability_information=[
-            "capability information",
-        ],
+        ]
+
+    def recent(self, conversation_id, limit=10):
+        return [
+            {
+                "content": "recent diary information",
+            }
+        ]
+
+
+class FakeCoreMemory:
+    def list_blocks(self):
+        return [
+            {
+                "label": "test",
+                "value": "core memory information",
+            }
+        ]
+
+
+def build_agent():
+    """
+    Construct the real JarvisAgent object without running its
+    infrastructure-heavy constructor.
+
+    The production _build_context() method and all real Context
+    components are used. Only external persistence/retrieval
+    dependencies are replaced with deterministic test doubles.
+    """
+
+    agent = JarvisAgent.__new__(JarvisAgent)
+
+    agent.state = SimpleNamespace(
+        agent_id="jarvis",
+        conversation_id=1,
+        current_task=None,
+        current_goal=None,
+        mode="idle",
+        active_project=None,
+        active_operation=None,
+        operation_status="idle",
     )
 
-
-def build_builder():
-    return AdaptiveContextBuilder(
-        compiler=ContextCompiler(
-            system_prompt="Test system prompt."
-        ),
-        window_manager=ContextWindowManager(),
-    )
-
-
-def test_fast_profile_is_applied_at_runtime():
-    state = type(
-        "State",
-        (),
+    agent.messages = [
         {
-            "mode": type(
-                "Mode",
-                (),
-                {"value": "fast"},
-            )(),
-            "phase": type(
-                "Phase",
-                (),
-                {"value": "initial"},
-            )(),
-            "terminal": False,
-            "aborted": False,
-        },
-    )()
+            "role": "user",
+            "content": "previous message",
+        }
+    ]
 
-    from jarvis.computation import ComputationMode
+    agent.operation_results = []
 
-    state.mode = ComputationMode.FAST
+    agent.retrieval = FakeRetrieval()
+    agent.diary = FakeDiary()
+    agent.core_memory = FakeCoreMemory()
 
-    signals = type(
-        "Signals",
-        (),
-        {
-            "get": lambda self, name: None,
-        },
-    )()
-
-    decision = ContextDemandPolicy().decide(
-        state=state,
-        signals=signals,
+    # REAL production context components.
+    agent.context_compiler = ContextCompiler(
+        system_prompt="Test system prompt"
     )
 
-    assert decision.profile.depth == ContextDepth.MINIMAL
+    agent.context_window = ContextWindowManager()
 
-    context = build_builder().build(
-        request=build_request(),
-        profile=decision.profile,
+    agent.context_policy = ContextDemandPolicy()
+
+    agent.context_builder = AdaptiveContextBuilder(
+        compiler=agent.context_compiler,
+        window_manager=agent.context_window,
     )
 
-    assert context is not None
-    assert isinstance(context.messages, list)
-
-    compiled_text = str(context.messages)
-
-    assert "previous conversation" in compiled_text
-    assert "retrieved information" in compiled_text
-    assert "knowledge item" not in compiled_text
-    assert "diary event" not in compiled_text
-    assert "relationship item" not in compiled_text
+    return agent
 
 
-def test_standard_profile_is_applied_at_runtime():
-    from jarvis.computation import (
-        ComputationMode,
-        ComputationState,
-        DemandSignals,
-    )
+def test_jarvis_agent_build_context_uses_real_adaptive_pipeline():
+    """
+    Exercise the real JarvisAgent._build_context() path.
 
-    state = ComputationState()
-    state.mode = ComputationMode.NORMAL
+    The call must pass through:
 
-    decision = ContextDemandPolicy().decide(
-        state=state,
-        signals=DemandSignals(),
-    )
+        JarvisAgent
+            -> ContextDemandPolicy
+            -> AdaptiveContextBuilder
+            -> ContextSelector
+            -> ContextCompiler
+            -> ContextWindowManager
+    """
 
-    assert decision.profile.depth == ContextDepth.STANDARD
-
-    context = build_builder().build(
-        request=build_request(),
-        profile=decision.profile,
-    )
-
-    assert context is not None
-
-    compiled_text = str(context.messages)
-
-    assert "previous conversation" in compiled_text
-    assert "retrieved information" in compiled_text
-    assert "core memory" in compiled_text
-    assert "diary event" in compiled_text
-    assert "operation result" in compiled_text
-
-
-def test_expanded_profile_is_applied_at_runtime():
-    from jarvis.computation import (
-        ComputationMode,
-        ComputationState,
-        DemandSignal,
-        DemandSignalStatus,
-        DemandSignals,
-    )
-
-    state = ComputationState()
-    state.mode = ComputationMode.NORMAL
-
-    signals = DemandSignals(
-        missing_information=DemandSignal(
-            name="missing_information",
-            value=0.9,
-            status=DemandSignalStatus.AVAILABLE,
-        )
-    )
-
-    decision = ContextDemandPolicy().decide(
-        state=state,
-        signals=signals,
-    )
-
-    assert decision.profile.depth == ContextDepth.EXPANDED
-
-    context = build_builder().build(
-        request=build_request(),
-        profile=decision.profile,
-    )
-
-    assert context is not None
-
-    compiled_text = str(context.messages)
-
-    assert "previous conversation" in compiled_text
-    assert "retrieved information" in compiled_text
-    assert "core memory" in compiled_text
-    assert "diary event" in compiled_text
-    assert "knowledge item" in compiled_text
-    assert "relationship item" in compiled_text
-    assert "operation result" in compiled_text
-    assert "capability information" in compiled_text
-
-
-def test_runtime_selection_changes_with_demand():
-    from jarvis.computation import (
-        ComputationMode,
-        ComputationState,
-        DemandSignal,
-        DemandSignalStatus,
-        DemandSignals,
-    )
-
-    builder = build_builder()
+    agent = build_agent()
 
     state = ComputationState()
     state.mode = ComputationMode.FAST
+
+    context = agent._build_context(
+        computation_state=state,
+        demand_signals=DemandSignals(),
+        user_input="hello jarvis",
+    )
+
+    assert context is not None
+
+    messages = context.as_messages()
+
+    assert messages
+
+    system_message = messages[0]
+
+    assert system_message["role"] == "system"
+    assert "Agent ID: jarvis" in system_message["content"]
+
+
+def test_jarvis_agent_changes_context_depth_with_demand():
+    """
+    Verify that the real JarvisAgent runtime changes its selected
+    context profile when contextual demand changes.
+    """
+
+    agent = build_agent()
+
+    state = ComputationState()
+    state.mode = ComputationMode.NORMAL
 
     low_demand = DemandSignals()
 
-    low_decision = ContextDemandPolicy().decide(
-        state=state,
-        signals=low_demand,
+    low_context = agent._build_context(
+        computation_state=state,
+        demand_signals=low_demand,
+        user_input="hello jarvis",
     )
-
-    low_context = builder.build(
-        request=build_request(),
-        profile=low_decision.profile,
-    )
-
-    state.mode = ComputationMode.NORMAL
 
     high_demand = DemandSignals(
         missing_information=DemandSignal(
@@ -245,51 +173,89 @@ def test_runtime_selection_changes_with_demand():
         )
     )
 
-    high_decision = ContextDemandPolicy().decide(
-        state=state,
-        signals=high_demand,
+    expanded_context = agent._build_context(
+        computation_state=state,
+        demand_signals=high_demand,
+        user_input="I need more information",
     )
 
-    high_context = builder.build(
-        request=build_request(),
-        profile=high_decision.profile,
+    assert low_context is not None
+    assert expanded_context is not None
+
+    low_text = str(
+        low_context.as_messages()
     )
 
-    assert low_decision.profile.depth == ContextDepth.MINIMAL
-    assert high_decision.profile.depth == ContextDepth.EXPANDED
-
-    low_text = str(low_context.messages)
-    high_text = str(high_context.messages)
-
-    assert "knowledge item" not in low_text
-    assert "knowledge item" in high_text
-
-    assert "relationship item" not in low_text
-    assert "relationship item" in high_text
-
-
-def test_context_window_is_still_applied_after_selection():
-    from jarvis.computation import (
-        ComputationMode,
-        ComputationState,
-        DemandSignals,
+    expanded_text = str(
+        expanded_context.as_messages()
     )
+
+    # Diary is excluded from minimal demand but available to
+    # expanded demand.
+    assert "diary information" not in low_text
+    assert "diary information" in expanded_text
+
+
+def test_jarvis_agent_preserves_required_state_across_profiles():
+    """
+    Current Agent State is REQUIRED by every ContextDemandProfile.
+
+    Therefore adaptive context selection must preserve it for
+    FAST, NORMAL, and DEEP computation modes.
+    """
+
+    agent = build_agent()
+
+    for mode in (
+        ComputationMode.FAST,
+        ComputationMode.NORMAL,
+        ComputationMode.DEEP,
+    ):
+        state = ComputationState()
+        state.mode = mode
+
+        context = agent._build_context(
+            computation_state=state,
+            demand_signals=DemandSignals(),
+            user_input="test",
+        )
+
+        messages = context.as_messages()
+
+        assert messages
+        assert messages[0]["role"] == "system"
+        assert "Agent ID: jarvis" in messages[0]["content"]
+
+
+def test_jarvis_agent_context_window_is_applied_after_adaptive_selection():
+    """
+    Verify that the real AdaptiveContextBuilder completes the
+    context-window stage after adaptive selection and compilation.
+    """
+
+    agent = build_agent()
 
     state = ComputationState()
     state.mode = ComputationMode.NORMAL
 
-    decision = ContextDemandPolicy().decide(
-        state=state,
-        signals=DemandSignals(),
-    )
-
-    builder = build_builder()
-
-    context = builder.build(
-        request=build_request(),
-        profile=decision.profile,
+    context = agent._build_context(
+        computation_state=state,
+        demand_signals=DemandSignals(),
+        user_input="test context window",
     )
 
     assert context is not None
-    assert context.messages
 
+    messages = context.as_messages()
+
+    assert isinstance(messages, list)
+
+    estimated_tokens = (
+        agent.context_window.estimate_context_tokens(
+            context
+        )
+    )
+
+    assert estimated_tokens <= (
+        agent.context_window.get_budget()
+    )

@@ -15,7 +15,9 @@ from jarvis.computation.state import (
     ComputationPhase,
     ComputationState,
 )
-
+from jarvis.computation.controller import (
+    ComputationController,
+)
 __all__ = [
     "ComputationAction",
     "ComputationDecision",
@@ -26,4 +28,5 @@ __all__ = [
     "DemandSignal",
     "DemandSignalStatus",
     "DemandSignals",
+    "ComputationController",
 ]
