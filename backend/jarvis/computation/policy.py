@@ -9,7 +9,14 @@ from jarvis.computation.signals import (
     DemandSignalStatus,
     DemandSignals,
 )
-from jarvis.computation.state import ComputationPhase, ComputationState
+
+from jarvis.computation import (
+    ComputationState,
+    DemandSignalStatus,
+    DemandSignals,
+)
+
+from jarvis.computation.state import ComputationPhase
 
 
 class ComputationPolicy:
