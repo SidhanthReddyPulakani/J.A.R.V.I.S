@@ -17,6 +17,10 @@ from jarvis.context.policy import (
 from jarvis.context.window import (
     ContextWindowManager,
 )
+from jarvis.context.selector import (
+    AdaptiveContextBuilder,
+    ContextSelector,
+)
 
 __all__ = [
     "AgentContext",
@@ -30,4 +34,6 @@ __all__ = [
     "ContextSourceDemand",
     "ContextDemandPolicy",
     "ContextPolicyDecision",
+    "AdaptiveContextBuilder",
+    "ContextSelector",
 ]

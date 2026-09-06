@@ -56,10 +56,14 @@ from jarvis.storage.repositories.diary import (
 
 from jarvis.context import (
     ContextCompiler,
+    ContextDemandPolicy,
     ContextRequest,
     ContextWindowManager,
 )
 
+from jarvis.context.selector import (
+    AdaptiveContextBuilder,
+)
 from jarvis.recall.service import RecallService
 
 from jarvis.memory.service import (
@@ -393,6 +397,7 @@ class JarvisAgent:
         # Context
         # --------------------------------------------------
 
+
         self.context_compiler = (
             ContextCompiler(
                 system_prompt=SYSTEM_PROMPT
@@ -403,9 +408,21 @@ class JarvisAgent:
             ContextWindowManager()
         )
 
+        self.context_policy = (
+            ContextDemandPolicy()
+        )
+
+        self.context_builder = (
+            AdaptiveContextBuilder(
+                compiler=self.context_compiler,
+                window_manager=self.context_window,
+            )
+        )
+
         self.computation_controller = (
             ComputationController()
         )
+
 
         # --------------------------------------------------
         # In-memory conversation representation
@@ -909,11 +926,11 @@ class JarvisAgent:
             assistant_message
         )
 
-    def _build_context(
-        self,
+    def _build_context( 
+        self, computation_state: ComputationState, 
+        demand_signals: DemandSignals,
         user_input: str = "",
-        operation_results=None,
-    ):
+        operation_results=None, ):
         """
         Build the complete temporary Context for one
         Agent reasoning step.
@@ -1030,26 +1047,42 @@ class JarvisAgent:
         )
 
         # --------------------------------------------------
-        # Compile
+        # O2 — Adaptive Context Demand
+        #
+        # Determine how much contextual information this
+        # reasoning step actually requires.
+        #
+        # The policy is model-independent and does not
+        # retrieve, compile, or tokenize anything.
         # --------------------------------------------------
 
-        compiled = (
-            self.context_compiler.compile(
-                request
+        context_decision = (
+            self.context_policy.decide(
+                state=computation_state,
+                signals=demand_signals,
             )
         )
 
         # --------------------------------------------------
-        # Apply the total Context Window boundary.
+        # O2 — Adaptive Context Assembly
         #
-        # P5.4 token-aware eviction occurs here.
-        # P5.6 guarantees that this only changes the
-        # temporary context representation.
+        # AdaptiveContextBuilder performs:
+        #
+        #     source selection
+        #          ↓
+        #     context compilation
+        #          ↓
+        #     context-window enforcement
+        #
+        # The resulting AgentContext remains temporary.
         # --------------------------------------------------
 
-        return self.context_window.prepare(
-            compiled
+        return self.context_builder.build(
+            request=request,
+            profile=context_decision.profile,
         )
+
+
         # ======================================================
     # STATE
     # ======================================================
@@ -1306,7 +1339,9 @@ class JarvisAgent:
         # --------------------------------------------------
 
         context = self._build_context(
-            user_input=user_input
+            computation_state=computation_state,
+            demand_signals=initial_signals,
+            user_input=user_input,
         )
 
         # --------------------------------------------------
@@ -1373,7 +1408,10 @@ class JarvisAgent:
 
             if step > 0:
 
-                context = self._build_context()
+                context = self._build_context(
+                    computation_state=computation_state,
+                    demand_signals=pre_llm_signals,
+                )
 
             # --------------------------------------------------
             # Execute exactly one model turn.
