@@ -1,3 +1,4 @@
+import time
 from ollama import ResponseError
 
 from jarvis.core.llm import LLMClient
@@ -8,8 +9,6 @@ from jarvis.storage.database import database
 from jarvis.storage.repositories.agent_state import (
     AgentStateRepository,
 )
-
-import time
 
 from jarvis.memory.operation_results import (
     OperationResult,
@@ -108,6 +107,19 @@ from jarvis.core.agent_trace import (
 from jarvis.core.agent_observation import (
     AgentOperationObservation,
 )
+
+from jarvis.core.reasoning_controller import (
+    ReasoningController,
+    ReasoningState,
+)
+
+from jarvis.core.stagnation_detector import (
+    StagnationDetector,
+)   
+from jarvis.core.reasoning_observer import (
+    ReasoningObserver,
+)
+
 SYSTEM_PROMPT = """You are Jarvis, a fast local desktop assistant.
 
 Your priorities:
@@ -776,62 +788,149 @@ class JarvisAgent:
             )
 
         return error_message
+    
+    def _has_complete_tool_call(
+        self,
+        tool_call,
+    ) -> bool:
+        function = getattr(
+            tool_call,
+            "function",
+            None,
+        )
 
+        if function is None:
+            return False
+
+        name = getattr(
+            function,
+            "name",
+            None,
+        )
+
+        arguments = getattr(
+            function,
+            "arguments",
+            None,
+        )
+
+        if not name:
+            return False
+
+        if arguments is None:
+            return False
+
+        return True
+    
     def _run_agent_turn(
         self,
         context,
+        reasoning_observer: ReasoningObserver,
     ) -> AgentTurnResult:
         """
-        Execute exactly one LLM interaction and normalize
-        the provider response into the Agent Turn contract.
+        Execute one streamed LLM interaction and normalize
+        observations into the Agent Turn contract.
 
-        This method does not execute tools, mutate memory,
-        persist messages, rebuild context, or control the
-        reasoning loop.
+        Phase 3:
+            A complete structured tool call is an immediate
+            commit signal and terminates the stream.
 
-        Those responsibilities remain with the Agent runtime.
+        Phase 8.2:
+            ReasoningObserver observes the streamed reasoning
+            trajectory but does not control termination.
 
-        The method therefore establishes the boundary:
-
-            provider response
-                ↓
-            AgentTurnResult
+        This method does not execute tools or control the
+        broader reasoning loop.
         """
 
-        response = self.llm.chat(
+        content_parts = []
+        thinking_parts = []
+        tool_calls = []
+
+        reasoning_started_at = None
+
+        for chunk in self.llm.stream(
             messages=context.as_messages(),
             tools=self._get_llm_tools(),
-        )
+        ):
+            thinking = (
+                chunk.get("thinking")
+                or ""
+            )
 
-        message = response.message
+            if thinking:
+                if reasoning_started_at is None:
+                    reasoning_started_at = time.perf_counter()
+
+                thinking_parts.append(thinking)
+
+                elapsed_ms = (
+                    time.perf_counter()
+                    - reasoning_started_at
+                ) * 1000.0
+
+                reasoning_observer.observe(
+                    thinking="".join(
+                        thinking_parts
+                    ),
+                    elapsed_ms=elapsed_ms,
+                )
+
+            content = (
+                chunk.get("content")
+                or ""
+            )
+
+            if content:
+                content_parts.append(
+                    content
+                )
+
+            chunk_tool_calls = (
+                chunk.get("tool_calls")
+                or []
+            )
+
+            if chunk_tool_calls:
+
+                complete_tool_calls = [
+                    call
+                    for call in chunk_tool_calls
+                    if self._has_complete_tool_call(
+                        call
+                    )
+                ]
+
+                if complete_tool_calls:
+
+                    for call in complete_tool_calls:
+
+                        tool_calls.append(
+                            AgentToolCall(
+                                id=getattr(
+                                    call,
+                                    "id",
+                                    None,
+                                ),
+                                name=call.function.name,
+                                arguments=dict(
+                                    call.function.arguments
+                                ),
+                            )
+                        )
+
+                    # Existing Phase 3 commit signal.
+                    break
+
+            if chunk.get("done", False):
+                break
 
         assistant_message = {
             "role": "assistant",
-            "content": (
-                message.content
-                or ""
+            "content": "".join(
+                content_parts
             ),
         }
-
-        tool_calls = []
-
-        for call in (
-            message.tool_calls
-            or []
-        ):
-            tool_calls.append(
-                AgentToolCall(
-                    id=getattr(
-                        call,
-                        "id",
-                        None,
-                    ),
-                    name=call.function.name,
-                    arguments=dict(
-                        call.function.arguments
-                    ),
-                )
-            )
 
         return AgentTurnResult(
             assistant_message=assistant_message,
@@ -839,7 +938,6 @@ class JarvisAgent:
                 tool_calls
             ),
         )
-    
     @staticmethod
     def _strip_thinking(content: str) -> str:
         if not content:
@@ -1037,6 +1135,7 @@ class JarvisAgent:
             compiled
         )
         # ======================================================
+      
     # STATE
     # ======================================================
 
@@ -1082,6 +1181,23 @@ class JarvisAgent:
         self.last_execution_trace = (
             AgentExecutionTrace()
         )
+
+        reasoning_controller = ReasoningController()
+
+        reasoning_observer = ReasoningObserver()    
+
+        stagnation_detector = StagnationDetector(
+            window_size=3
+        )
+
+        # --------------------------------------------------
+        # Phase 7 — temporary reasoning intervention.
+        #
+        # This is consumed by _build_context() for one
+        # reasoning cycle only. It is never persisted.
+        # --------------------------------------------------
+
+        self.reasoning_intervention = None
 
         user_message = {
             "role": "user",
@@ -1139,6 +1255,8 @@ class JarvisAgent:
             self.MAX_REASONING_STEPS
         ):
 
+            reasoning_controller.start_generation()
+
             # --------------------------------------------------
             # Rebuild context after the first reasoning step.
             #
@@ -1155,8 +1273,89 @@ class JarvisAgent:
             # --------------------------------------------------
 
             turn = self._run_agent_turn(
-                context
+                context,
+                reasoning_observer,
             )
+
+            # --------------------------------------------------
+            # Phase 7 — Stagnation detection.
+            #
+            # Detect before ReasoningController.observe()
+            # so intervention occurs while the controller is
+            # still in GENERATING.
+            # --------------------------------------------------
+
+            tool_intents = tuple(
+                f"{call.name}:{sorted(call.arguments.items())}"
+                for call in turn.tool_calls
+            )
+
+            stagnation_observation = (
+                stagnation_detector.observe(
+                    content=turn.assistant_message.get(
+                        "content",
+                        "",
+                    ),
+                    tool_intents=tool_intents,
+                    new_action_information=(
+                        bool(turn.tool_calls)
+                        or bool(self.operation_results)
+                    ),
+                )
+            )
+
+            # --------------------------------------------------
+            # Phase 7 — Bounded intervention.
+            #
+            # First detected stall:
+            #     intervene → fresh reasoning cycle
+            #
+            # Repeated stall after intervention:
+            #     controller aborts
+            #
+            # The intervention is deliberately placed before
+            # normal tool execution so a stagnant tool request
+            # is not executed a second time automatically.
+            # --------------------------------------------------
+
+            if stagnation_observation.stagnant:
+
+                reasoning_controller.intervene()
+
+                if (
+                    reasoning_controller.state
+                    == ReasoningState.ABORT
+                ):
+                    break
+
+                stagnation_detector.reset()
+
+                self.reasoning_intervention = (
+                    "The previous reasoning cycle did not make "
+                    "useful progress. Re-evaluate the task from "
+                    "the available evidence and choose the next "
+                    "useful action or provide the final answer. "
+                    "Do not repeat an action that has already "
+                    "succeeded."
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # Normal reasoning state transition.
+            # --------------------------------------------------
+
+            if turn.completed:
+
+                reasoning_controller.observe(
+                    final_answer=True
+                )
+
+            else:
+
+                reasoning_controller.observe(
+                    actionable_tool_call=True
+                )
 
             # --------------------------------------------------
             # Preserve the assistant turn, including tool calls.
@@ -1257,6 +1456,18 @@ class JarvisAgent:
                     )
                 )
 
+            # --------------------------------------------------
+            # Phase 6 — Evidence-driven continuation.
+            #
+            # Capability results are new evidence. Another model
+            # cycle is permitted only when the task remains
+            # unresolved after that evidence.
+            # --------------------------------------------------
+
+            reasoning_controller.continue_after_evidence(
+                task_unresolved=True
+            )
+
         # --------------------------------------------------
         # Safety termination
         #
@@ -1264,6 +1475,12 @@ class JarvisAgent:
         # step requested further operations and none produced
         # normal model completion.
         # --------------------------------------------------
+
+        if (
+            reasoning_controller.state
+            == ReasoningState.GENERATING
+        ):
+            reasoning_controller.abort()
 
         if final_text is None:
 
