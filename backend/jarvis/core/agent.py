@@ -460,6 +460,7 @@ class JarvisAgent:
             self.memory_formation.form(
                 candidate
             )
+
     def _get_llm_tools(self) -> list[dict]:
         """
         Return all tools available to the LLM.
