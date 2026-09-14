@@ -12,7 +12,7 @@ LOG_DIR = ROOT_DIR / "logs"
 class Settings:
     llm_model: str = os.getenv(
         "JARVIS_LLM_MODEL",
-        "qwen3:4b",
+        "qwen2.5:3b",
     )
 
     ollama_host: str = os.getenv(
